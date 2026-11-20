@@ -1,0 +1,7 @@
+[workspace]
+members = ["hc32-ddl-hal", "hc32-ll-hal"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
