@@ -9,6 +9,6 @@
 
 当前为仓库骨架，尚未接入 PAC、芯片 feature 或外设驱动。在仓库根目录运行 `cargo check --workspace` 可检查两个 crate。开发约定见 [AGENTS.md](AGENTS.md)。
 
-板级例程按 `examples/<ddl 或 ll>/<板名>/src/bin/<例程名>.rs` 组织，每块板独立构建。
+例程按 `examples/<ddl 或 ll>/<外设>/src/bin/<外设>_vN.rs` 组织，每个外设独立构建，各 `vN` 支持的 MCU 见对应 `<外设>.md`；例程日志输出推荐使用 SEGGER RTT。
 
-各系列的驱动、例程和板测进度见[系列与外设支持表](docs/peripheral-support.md)。
+各系列的驱动、例程和实测进度见[系列与外设支持表](docs/peripheral-support.md)。
