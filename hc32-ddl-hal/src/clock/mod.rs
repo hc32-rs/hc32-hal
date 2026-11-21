@@ -773,6 +773,10 @@ pub fn clocks() -> Clocks {
     }
 }
 
+// L13x 默认路径不经此更新（快照保持 BACKEND_RCH_HZ 默认值），仅
+// sysctrl_ddl_v2_2 的可配置时钟树调用。
+#[cfg(sysctrl_ddl_v2_2)]
+#[allow(dead_code)]
 fn store_clocks(c: Clocks) {
     SYS_HZ.store(c.sys.0, Ordering::Relaxed);
     HCLK_HZ.store(c.hclk.0, Ordering::Relaxed);

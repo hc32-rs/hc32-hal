@@ -27,9 +27,6 @@
 #![no_std]
 // 零料号：所有驱动模块都被 cfg 关闭，死代码警告无意义。
 #![cfg_attr(not(feature = "_chip-selected"), allow(unused))]
-// L130 仅接入默认初始化与引脚单例，数字 GPIO 读写（set_out/read_in 等
-// 后端原语）由下一步实现 trait 时启用，暂留的未用告警在此关闭。
-#![cfg_attr(feature = "hc32l130", allow(unused))]
 
 // 零料号：所有驱动模块都被 cfg 关闭，此诊断是唯一输出。
 #[cfg(not(feature = "_chip-selected"))]

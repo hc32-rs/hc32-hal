@@ -28,6 +28,7 @@ pub(crate) fn write_sysctrl0(f: impl FnOnce(&mut pac::sysctrl_ddl_v3_1::regs::Sy
 }
 
 /// 读取 SYSCTRL0（时钟源选择、分频）。
+#[allow(dead_code)] // 可配置时钟树接入后使用（L110 侧同名列已按此标记）
 pub(crate) fn read_sysctrl0() -> pac::sysctrl_ddl_v3_1::regs::Sysctrl0 {
     pac::SYSCTRL.sysctrl0().read()
 }
@@ -43,6 +44,7 @@ pub(crate) fn modify_rch_cr(f: impl FnOnce(&mut pac::sysctrl_ddl_v3_1::regs::Rch
 }
 
 /// 读取 RCH 控制寄存器（TRIM、STABLE）。
+#[allow(dead_code)] // 可配置时钟树接入后使用
 pub(crate) fn read_rch_cr() -> pac::sysctrl_ddl_v3_1::regs::RchCr {
     pac::SYSCTRL.rch_cr().read()
 }

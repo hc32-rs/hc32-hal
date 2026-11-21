@@ -12,6 +12,12 @@
 //! 两种布局都没有输出速度档位，只有驱动能力档位（PxDR），因此用
 //! [`Drive`] 取代 Embassy STM32 HAL 的 `Speed`。
 //!
+//! 写路径差异：v3_3 的 `set_high`/`set_low` 走位置位/位清零寄存器
+//! （PxBSET/PxBCLR，W1 位，整字只写目标引脚掩码，SDK `Gpio_SetIO`/
+//! `Gpio_ClrIO` 同做法）；v2 没有这对寄存器，退化为 PxOUT 读-改-写。
+//! 输入电平一律从 PxIN 采样寄存器读，输出锁存（StatefulOutputPin 的
+//! `is_set_high` 等）一律从 PxOUT 读回，两种布局一致。
+//!
 //! [`gpio_v2`]: self::gpio_v2
 //! [`gpio_v3_3`]: self::gpio_v3_3
 
@@ -71,7 +77,8 @@ impl From<Level> for bool {
 
 /// 内部上拉/下拉选择。
 ///
-/// 上拉典型值约 80 kΩ、下拉典型值约 40 kΩ（VCC = 3.3 V，DS 7.3.12）。
+/// 上拉典型值约 80 kΩ、下拉典型值约 40 kΩ（VCC = 3.3 V；L110 DS
+/// 7.3.12、L13x DS Rev2.20 7.3.13.2，两侧规格一致）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
 pub enum Pull {
     /// 无上拉/下拉。
@@ -85,8 +92,9 @@ pub enum Pull {
 
 /// 输出驱动能力档位（PxDR）。
 ///
-/// 复位默认为高驱动。电流规格见 DS 7.3.12：高驱动对应双驱规格，低驱动
-/// 对应单驱规格。
+/// 复位默认为高驱动。电流规格：高驱动对应双驱规格（L13x 约 20 mA，
+/// DS 表 7-8 VOHD/VOLD 行），低驱动对应单驱规格（L110 DS 7.3.12、
+/// L13x DS 7.3.13.1）。
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
 pub enum Drive {
     /// 高驱动（PxDR = 0），复位默认。
@@ -141,11 +149,13 @@ pub trait Pin: crate::peripheral::PeripheralType + SealedPin + Sized + 'static {
 /// 通信外设驱动按其引脚 trait 提供的复用编号调用；GPIO 驱动本身只用
 /// `af = 0` 回到 GPIO 功能。
 ///
-/// 先打开 GPIO 门控（PERI_CLKEN 位 28 复位为 0，RM 3.5.8；门控关闭时
-/// 对 GPIO 寄存器的写入不生效），幂等。
+/// 先打开 GPIO 门控（L110 RM 3.5.8 / L13x RM 3.5.9 的 PERI_CLKEN 位 28
+/// 复位为 0，门控关闭时对 GPIO 寄存器的写入不生效），幂等。
 ///
 /// SDK 复用宏的固定动作序列：ADS 清零 → SEL 写功能号 → DIR 按信号方向
-/// （driver/inc/gpio.h 的 Gpio_SetFunc_* 系列）。上/下拉由驱动按需配置。
+/// （L110 driver/inc/gpio.h 的 `Gpio_SetFunc_*` 系列；L13x 对应
+/// `Gpio_SetAfMode` 直写 Pxy_SEL）。上/下拉由驱动按需配置。
+#[allow(dead_code)] // L13x 侧由后续接入的通信驱动（UART 等）调用
 pub(crate) fn set_pin_af(n: PinId, af: u8, input: bool, pull: Pull) {
     crate::clock::enable_gpio();
     backend::set_ads(n, false);
@@ -174,7 +184,8 @@ pub struct Flex<'d> {
 impl<'d> Flex<'d> {
     /// 接管一个引脚单例，不改变其当前配置。
     pub fn new(pin: Peri<'d, impl Pin>) -> Self {
-        // GPIO 门控复位后为关（RM 3.5.8 位 28，复位值 0xC080_0000），先打开。
+        // GPIO 门控复位后为关（L110 RM 3.5.8 位 28 / L13x RM 3.5.9 位 28），
+        // 先打开。
         crate::clock::enable_gpio();
         Self {
             pin: pin.pin_id(),
@@ -369,7 +380,8 @@ pub struct Output<'d> {
 impl<'d> Output<'d> {
     /// 以 `drive` 驱动能力接管引脚为推挽输出。
     ///
-    /// 先写输出锁存再切方向，避免切换瞬间的初值毛刺。
+    /// 先写输出锁存再切方向（SDK `Gpio_Init` 同序：OUT → DIR），确保
+    /// DIR 置输出的瞬间锁存器里已是 `initial_output`，不会出现初值毛刺。
     pub fn new(pin: Peri<'d, impl Pin>, initial_output: Level, drive: Drive) -> Self {
         let mut pin = Flex::new(pin);
         pin.set_level(initial_output);

@@ -6,6 +6,12 @@
 //! 模拟位 PxADS 1 = 模拟（RM 6.5.1.20），与 L110 的 v2 布局语义一致，
 //! 仅寄存器名按端口命名。
 //!
+//! 输出置位/清零走本 IP 特有的位置位/位清零寄存器（PxBSET/PxBCLR，
+//! RM 6.5.1.21/22，W1 位：1 = 置位/清零，0 = 保持）：整字只写目标引脚
+//! 的掩码，不动其他引脚的锁存，也不需要读-改-写（SDK `Gpio_SetIO`/
+//! `Gpio_ClrIO` 同做法）。v2 布局没有这对寄存器，这是两个后端的主要
+//! 写路径差异。
+//!
 //! 门控：GPIO 寄存器访问前须打开 PERI_CLKEN 位 28（复位为 0，RM 3.5.9；
 //! 复位值 0x8080_0000），各入口幂等地先打开本门控。
 
@@ -17,6 +23,7 @@ use crate::pac;
 /// PERI_CLKEN 位 28 复位为 0（RM 3.5.9）；门控关闭时对 GPIO 寄存器的
 /// 写入不生效。公共 GPIO 初始化经由当前型号的系统控制器（clock 模块的
 /// [`crate::clock::enable_gpio`]）打开本门控。
+#[allow(dead_code)] // L13x 侧由后续接入的通信驱动（UART 等）调用
 pub(crate) fn enable() {
     crate::clock::enable_gpio();
 }
@@ -87,67 +94,147 @@ pub(crate) fn set_dir(n: PinId, input: bool) {
     }
 }
 
+/// 输出锁存置位（PxBSET 目标位写 1，其余位写 0 保持，RM 6.5.1.21）。
+///
+/// `write` 从全 0 起写：整字只含目标引脚的掩码，符合 W1 位语义
+/// （1 = 置位，0 = 保持），不触碰同端口其他引脚的锁存。
+#[inline(always)]
+pub(crate) fn set_out_high(n: PinId) {
+    match (n.port, n.pin) {
+        (0, 0) => pac::GPIO.pabset().write(|w| w.set_pa00(true)),
+        (0, 1) => pac::GPIO.pabset().write(|w| w.set_pa01(true)),
+        (0, 2) => pac::GPIO.pabset().write(|w| w.set_pa02(true)),
+        (0, 3) => pac::GPIO.pabset().write(|w| w.set_pa03(true)),
+        (0, 4) => pac::GPIO.pabset().write(|w| w.set_pa04(true)),
+        (0, 5) => pac::GPIO.pabset().write(|w| w.set_pa05(true)),
+        (0, 6) => pac::GPIO.pabset().write(|w| w.set_pa06(true)),
+        (0, 7) => pac::GPIO.pabset().write(|w| w.set_pa07(true)),
+        (0, 8) => pac::GPIO.pabset().write(|w| w.set_pa08(true)),
+        (0, 9) => pac::GPIO.pabset().write(|w| w.set_pa09(true)),
+        (0, 10) => pac::GPIO.pabset().write(|w| w.set_pa10(true)),
+        (0, 11) => pac::GPIO.pabset().write(|w| w.set_pa11(true)),
+        (0, 12) => pac::GPIO.pabset().write(|w| w.set_pa12(true)),
+        (0, 13) => pac::GPIO.pabset().write(|w| w.set_pa13(true)),
+        (0, 14) => pac::GPIO.pabset().write(|w| w.set_pa14(true)),
+        (0, 15) => pac::GPIO.pabset().write(|w| w.set_pa15(true)),
+        (1, 0) => pac::GPIO.pbbset().write(|w| w.set_pb00(true)),
+        (1, 1) => pac::GPIO.pbbset().write(|w| w.set_pb01(true)),
+        (1, 2) => pac::GPIO.pbbset().write(|w| w.set_pb02(true)),
+        (1, 3) => pac::GPIO.pbbset().write(|w| w.set_pb03(true)),
+        (1, 4) => pac::GPIO.pbbset().write(|w| w.set_pb04(true)),
+        (1, 5) => pac::GPIO.pbbset().write(|w| w.set_pb05(true)),
+        (1, 6) => pac::GPIO.pbbset().write(|w| w.set_pb06(true)),
+        (1, 7) => pac::GPIO.pbbset().write(|w| w.set_pb07(true)),
+        (1, 8) => pac::GPIO.pbbset().write(|w| w.set_pb08(true)),
+        (1, 9) => pac::GPIO.pbbset().write(|w| w.set_pb09(true)),
+        (1, 10) => pac::GPIO.pbbset().write(|w| w.set_pb10(true)),
+        (1, 11) => pac::GPIO.pbbset().write(|w| w.set_pb11(true)),
+        (1, 12) => pac::GPIO.pbbset().write(|w| w.set_pb12(true)),
+        (1, 13) => pac::GPIO.pbbset().write(|w| w.set_pb13(true)),
+        (1, 14) => pac::GPIO.pbbset().write(|w| w.set_pb14(true)),
+        (1, 15) => pac::GPIO.pbbset().write(|w| w.set_pb15(true)),
+        (2, 0) => pac::GPIO.pcbset().write(|w| w.set_pc00(true)),
+        (2, 1) => pac::GPIO.pcbset().write(|w| w.set_pc01(true)),
+        (2, 2) => pac::GPIO.pcbset().write(|w| w.set_pc02(true)),
+        (2, 3) => pac::GPIO.pcbset().write(|w| w.set_pc03(true)),
+        (2, 4) => pac::GPIO.pcbset().write(|w| w.set_pc04(true)),
+        (2, 5) => pac::GPIO.pcbset().write(|w| w.set_pc05(true)),
+        (2, 6) => pac::GPIO.pcbset().write(|w| w.set_pc06(true)),
+        (2, 7) => pac::GPIO.pcbset().write(|w| w.set_pc07(true)),
+        (2, 8) => pac::GPIO.pcbset().write(|w| w.set_pc08(true)),
+        (2, 9) => pac::GPIO.pcbset().write(|w| w.set_pc09(true)),
+        (2, 10) => pac::GPIO.pcbset().write(|w| w.set_pc10(true)),
+        (2, 11) => pac::GPIO.pcbset().write(|w| w.set_pc11(true)),
+        (2, 12) => pac::GPIO.pcbset().write(|w| w.set_pc12(true)),
+        (2, 13) => pac::GPIO.pcbset().write(|w| w.set_pc13(true)),
+        (2, 14) => pac::GPIO.pcbset().write(|w| w.set_pc14(true)),
+        (2, 15) => pac::GPIO.pcbset().write(|w| w.set_pc15(true)),
+        (3, 0) => pac::GPIO.pdbset().write(|w| w.set_pd00(true)),
+        (3, 1) => pac::GPIO.pdbset().write(|w| w.set_pd01(true)),
+        (3, 2) => pac::GPIO.pdbset().write(|w| w.set_pd02(true)),
+        (3, 3) => pac::GPIO.pdbset().write(|w| w.set_pd03(true)),
+        (3, 4) => pac::GPIO.pdbset().write(|w| w.set_pd04(true)),
+        (3, 5) => pac::GPIO.pdbset().write(|w| w.set_pd05(true)),
+        (3, 6) => pac::GPIO.pdbset().write(|w| w.set_pd06(true)),
+        (3, 7) => pac::GPIO.pdbset().write(|w| w.set_pd07(true)),
+        _ => unreachable!("GPIO v3_3 后端无此引脚"),
+    }
+}
+
+/// 输出锁存清零（PxBCLR 目标位写 1，其余位写 0 保持，RM 6.5.1.22）。
+#[inline(always)]
+pub(crate) fn set_out_low(n: PinId) {
+    match (n.port, n.pin) {
+        (0, 0) => pac::GPIO.pabclr().write(|w| w.set_pa00(true)),
+        (0, 1) => pac::GPIO.pabclr().write(|w| w.set_pa01(true)),
+        (0, 2) => pac::GPIO.pabclr().write(|w| w.set_pa02(true)),
+        (0, 3) => pac::GPIO.pabclr().write(|w| w.set_pa03(true)),
+        (0, 4) => pac::GPIO.pabclr().write(|w| w.set_pa04(true)),
+        (0, 5) => pac::GPIO.pabclr().write(|w| w.set_pa05(true)),
+        (0, 6) => pac::GPIO.pabclr().write(|w| w.set_pa06(true)),
+        (0, 7) => pac::GPIO.pabclr().write(|w| w.set_pa07(true)),
+        (0, 8) => pac::GPIO.pabclr().write(|w| w.set_pa08(true)),
+        (0, 9) => pac::GPIO.pabclr().write(|w| w.set_pa09(true)),
+        (0, 10) => pac::GPIO.pabclr().write(|w| w.set_pa10(true)),
+        (0, 11) => pac::GPIO.pabclr().write(|w| w.set_pa11(true)),
+        (0, 12) => pac::GPIO.pabclr().write(|w| w.set_pa12(true)),
+        (0, 13) => pac::GPIO.pabclr().write(|w| w.set_pa13(true)),
+        (0, 14) => pac::GPIO.pabclr().write(|w| w.set_pa14(true)),
+        (0, 15) => pac::GPIO.pabclr().write(|w| w.set_pa15(true)),
+        (1, 0) => pac::GPIO.pbbclr().write(|w| w.set_pb00(true)),
+        (1, 1) => pac::GPIO.pbbclr().write(|w| w.set_pb01(true)),
+        (1, 2) => pac::GPIO.pbbclr().write(|w| w.set_pb02(true)),
+        (1, 3) => pac::GPIO.pbbclr().write(|w| w.set_pb03(true)),
+        (1, 4) => pac::GPIO.pbbclr().write(|w| w.set_pb04(true)),
+        (1, 5) => pac::GPIO.pbbclr().write(|w| w.set_pb05(true)),
+        (1, 6) => pac::GPIO.pbbclr().write(|w| w.set_pb06(true)),
+        (1, 7) => pac::GPIO.pbbclr().write(|w| w.set_pb07(true)),
+        (1, 8) => pac::GPIO.pbbclr().write(|w| w.set_pb08(true)),
+        (1, 9) => pac::GPIO.pbbclr().write(|w| w.set_pb09(true)),
+        (1, 10) => pac::GPIO.pbbclr().write(|w| w.set_pb10(true)),
+        (1, 11) => pac::GPIO.pbbclr().write(|w| w.set_pb11(true)),
+        (1, 12) => pac::GPIO.pbbclr().write(|w| w.set_pb12(true)),
+        (1, 13) => pac::GPIO.pbbclr().write(|w| w.set_pb13(true)),
+        (1, 14) => pac::GPIO.pbbclr().write(|w| w.set_pb14(true)),
+        (1, 15) => pac::GPIO.pbbclr().write(|w| w.set_pb15(true)),
+        (2, 0) => pac::GPIO.pcbclr().write(|w| w.set_pc00(true)),
+        (2, 1) => pac::GPIO.pcbclr().write(|w| w.set_pc01(true)),
+        (2, 2) => pac::GPIO.pcbclr().write(|w| w.set_pc02(true)),
+        (2, 3) => pac::GPIO.pcbclr().write(|w| w.set_pc03(true)),
+        (2, 4) => pac::GPIO.pcbclr().write(|w| w.set_pc04(true)),
+        (2, 5) => pac::GPIO.pcbclr().write(|w| w.set_pc05(true)),
+        (2, 6) => pac::GPIO.pcbclr().write(|w| w.set_pc06(true)),
+        (2, 7) => pac::GPIO.pcbclr().write(|w| w.set_pc07(true)),
+        (2, 8) => pac::GPIO.pcbclr().write(|w| w.set_pc08(true)),
+        (2, 9) => pac::GPIO.pcbclr().write(|w| w.set_pc09(true)),
+        (2, 10) => pac::GPIO.pcbclr().write(|w| w.set_pc10(true)),
+        (2, 11) => pac::GPIO.pcbclr().write(|w| w.set_pc11(true)),
+        (2, 12) => pac::GPIO.pcbclr().write(|w| w.set_pc12(true)),
+        (2, 13) => pac::GPIO.pcbclr().write(|w| w.set_pc13(true)),
+        (2, 14) => pac::GPIO.pcbclr().write(|w| w.set_pc14(true)),
+        (2, 15) => pac::GPIO.pcbclr().write(|w| w.set_pc15(true)),
+        (3, 0) => pac::GPIO.pdbclr().write(|w| w.set_pd00(true)),
+        (3, 1) => pac::GPIO.pdbclr().write(|w| w.set_pd01(true)),
+        (3, 2) => pac::GPIO.pdbclr().write(|w| w.set_pd02(true)),
+        (3, 3) => pac::GPIO.pdbclr().write(|w| w.set_pd03(true)),
+        (3, 4) => pac::GPIO.pdbclr().write(|w| w.set_pd04(true)),
+        (3, 5) => pac::GPIO.pdbclr().write(|w| w.set_pd05(true)),
+        (3, 6) => pac::GPIO.pdbclr().write(|w| w.set_pd06(true)),
+        (3, 7) => pac::GPIO.pdbclr().write(|w| w.set_pd07(true)),
+        _ => unreachable!("GPIO v3_3 后端无此引脚"),
+    }
+}
+
 /// 输出锁存位（PxOUT）：`true` = 高。
+///
+/// 单引脚置位/清零走 PxBSET/PxBCLR（见 [`set_out_high`]/[`set_out_low`]）。
+/// BSET/BCLR 是 W1 触发映像，电平状态仍从 PxOUT 锁存读取（`read_out`）。
 #[inline(always)]
 pub(crate) fn set_out(n: PinId, high: bool) {
-    match (n.port, n.pin) {
-        (0, 0) => pac::GPIO.paout().modify(|w| w.set_pa00(high)),
-        (0, 1) => pac::GPIO.paout().modify(|w| w.set_pa01(high)),
-        (0, 2) => pac::GPIO.paout().modify(|w| w.set_pa02(high)),
-        (0, 3) => pac::GPIO.paout().modify(|w| w.set_pa03(high)),
-        (0, 4) => pac::GPIO.paout().modify(|w| w.set_pa04(high)),
-        (0, 5) => pac::GPIO.paout().modify(|w| w.set_pa05(high)),
-        (0, 6) => pac::GPIO.paout().modify(|w| w.set_pa06(high)),
-        (0, 7) => pac::GPIO.paout().modify(|w| w.set_pa07(high)),
-        (0, 8) => pac::GPIO.paout().modify(|w| w.set_pa08(high)),
-        (0, 9) => pac::GPIO.paout().modify(|w| w.set_pa09(high)),
-        (0, 10) => pac::GPIO.paout().modify(|w| w.set_pa10(high)),
-        (0, 11) => pac::GPIO.paout().modify(|w| w.set_pa11(high)),
-        (0, 12) => pac::GPIO.paout().modify(|w| w.set_pa12(high)),
-        (0, 13) => pac::GPIO.paout().modify(|w| w.set_pa13(high)),
-        (0, 14) => pac::GPIO.paout().modify(|w| w.set_pa14(high)),
-        (0, 15) => pac::GPIO.paout().modify(|w| w.set_pa15(high)),
-        (1, 0) => pac::GPIO.pbout().modify(|w| w.set_pb00(high)),
-        (1, 1) => pac::GPIO.pbout().modify(|w| w.set_pb01(high)),
-        (1, 2) => pac::GPIO.pbout().modify(|w| w.set_pb02(high)),
-        (1, 3) => pac::GPIO.pbout().modify(|w| w.set_pb03(high)),
-        (1, 4) => pac::GPIO.pbout().modify(|w| w.set_pb04(high)),
-        (1, 5) => pac::GPIO.pbout().modify(|w| w.set_pb05(high)),
-        (1, 6) => pac::GPIO.pbout().modify(|w| w.set_pb06(high)),
-        (1, 7) => pac::GPIO.pbout().modify(|w| w.set_pb07(high)),
-        (1, 8) => pac::GPIO.pbout().modify(|w| w.set_pb08(high)),
-        (1, 9) => pac::GPIO.pbout().modify(|w| w.set_pb09(high)),
-        (1, 10) => pac::GPIO.pbout().modify(|w| w.set_pb10(high)),
-        (1, 11) => pac::GPIO.pbout().modify(|w| w.set_pb11(high)),
-        (1, 12) => pac::GPIO.pbout().modify(|w| w.set_pb12(high)),
-        (1, 13) => pac::GPIO.pbout().modify(|w| w.set_pb13(high)),
-        (1, 14) => pac::GPIO.pbout().modify(|w| w.set_pb14(high)),
-        (1, 15) => pac::GPIO.pbout().modify(|w| w.set_pb15(high)),
-        (2, 0) => pac::GPIO.pcout().modify(|w| w.set_pc00(high)),
-        (2, 1) => pac::GPIO.pcout().modify(|w| w.set_pc01(high)),
-        (2, 2) => pac::GPIO.pcout().modify(|w| w.set_pc02(high)),
-        (2, 3) => pac::GPIO.pcout().modify(|w| w.set_pc03(high)),
-        (2, 4) => pac::GPIO.pcout().modify(|w| w.set_pc04(high)),
-        (2, 5) => pac::GPIO.pcout().modify(|w| w.set_pc05(high)),
-        (2, 6) => pac::GPIO.pcout().modify(|w| w.set_pc06(high)),
-        (2, 7) => pac::GPIO.pcout().modify(|w| w.set_pc07(high)),
-        (2, 8) => pac::GPIO.pcout().modify(|w| w.set_pc08(high)),
-        (2, 9) => pac::GPIO.pcout().modify(|w| w.set_pc09(high)),
-        (2, 10) => pac::GPIO.pcout().modify(|w| w.set_pc10(high)),
-        (2, 11) => pac::GPIO.pcout().modify(|w| w.set_pc11(high)),
-        (2, 12) => pac::GPIO.pcout().modify(|w| w.set_pc12(high)),
-        (2, 13) => pac::GPIO.pcout().modify(|w| w.set_pc13(high)),
-        (2, 14) => pac::GPIO.pcout().modify(|w| w.set_pc14(high)),
-        (2, 15) => pac::GPIO.pcout().modify(|w| w.set_pc15(high)),
-        (3, 0) => pac::GPIO.pdout().modify(|w| w.set_pd00(high)),
-        (3, 1) => pac::GPIO.pdout().modify(|w| w.set_pd01(high)),
-        (3, 2) => pac::GPIO.pdout().modify(|w| w.set_pd02(high)),
-        (3, 3) => pac::GPIO.pdout().modify(|w| w.set_pd03(high)),
-        (3, 4) => pac::GPIO.pdout().modify(|w| w.set_pd04(high)),
-        (3, 5) => pac::GPIO.pdout().modify(|w| w.set_pd05(high)),
-        (3, 6) => pac::GPIO.pdout().modify(|w| w.set_pd06(high)),
-        (3, 7) => pac::GPIO.pdout().modify(|w| w.set_pd07(high)),
-        _ => unreachable!("GPIO v3_3 后端无此引脚"),
+    if high {
+        set_out_high(n);
+    } else {
+        set_out_low(n);
     }
 }
 
