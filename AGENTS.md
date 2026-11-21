@@ -28,6 +28,8 @@
 
 每块开发板一个独立 Cargo 包，例程路径为 `examples/<ddl 或 ll>/<开发板名>/src/bin/<例程名>.rs`。自制最小系统用具体芯片型号和接线定义目标。包内的 `Cargo.toml` 声明空的 `[workspace]`，通过 path 依赖对应 HAL 并固定板上芯片的 feature。同板例程共享编译目标、烧录配置和依赖。
 
+Cortex-M 板级例程使用 `cortex-m-rt` 的 `#[entry]` 和标准 `link.x`。由 PAC 提供芯片的 `device.x`、中断向量和 `memory.x`，在板级 target 配置中传入 `-Tlink.x`。在板包目录执行 `cargo build --bins --release` 验证最终链接。
+
 每个例程可独立运行，文件名描述用户能操作或观察到的行为。DDL 首批以 `examples/ddl/hc32l110-stk/` 为目标，依次适配 `clock_div.rs`（测量分频后的输出周期）、`blinky.rs`（LED 闪烁）和 `button_led.rs`（轮询按键控制 LED）。中断驱动就绪后可加入 `button_irq.rs`（按键边沿触发翻转）。其他板可沿用相同的例程名，按实际接线和验证需求添加例程。日志推荐使用 SEGGER RTT，可复用的 API 片段可放在 rustdoc 中。
 
 板级 `README.md` 写明开发板名、芯片完整型号、接线和有效电平，为每个例程列出运行命令和预期现象。上板后按例程记录实测结果、外设实例、IP 版本及观察到的行为。驱动、例程或板测结果变化时，同步更新[系列与外设支持表](docs/peripheral-support.md)，将 ✅ 链到板级 README 的对应实测条目。例如，`button_led` 可记录 GPIO 输入、输出和有效电平的验证结果，时钟分频功能则由 `clock_div` 的周期测量单独佐证。

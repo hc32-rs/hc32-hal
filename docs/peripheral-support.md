@@ -71,7 +71,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | bt | ➖ | ➖ | ➖ | ➖ | ➖ | ➖ | ⬜ |
 | btim | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | can | ⬜ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
-| clk_trim | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
+| clk_trim | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | [🧩](#hc32l110-clk_trim) |
 | crc | ⬜ | ⬜ | ⬜ | ⬜ | ➖ | ⬜ | ⬜ |
 | ctrim | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | cts | ⬜ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
@@ -79,7 +79,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | debug_active | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
 | dmac | ⬜ | ⬜ | ⬜ | ⬜ | ➖ | ⬜ | ➖ |
 | flash | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| gpio | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
+| gpio | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | [🧪](#hc32l110-gpio) |
 | gpioaux | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | gtim | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | hdiv | ⬜ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
@@ -98,7 +98,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | reset | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
 | rtc | ➖ | ➖ | ➖ | ➖ | ⬜ | ⬜ | ⬜ |
 | spi | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| sysctrl | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
+| sysctrl | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | [🧪](#hc32l110-sysctrl) |
 | tim | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
 | trng | ⬜ | ⬜ | ⬜ | ➖ | ⬜ | ⬜ | ➖ |
 | uart | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
@@ -397,3 +397,30 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | trng | ➖ | ➖ | ➖ | ➖ | ⬜ |
 | usart | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | wdt | ➖ | ➖ | ⬜ | ⬜ | ⬜ |
+
+## 状态说明条目
+
+### HC32L110 gpio
+
+🧪 已编写待测试。`hc32-ddl-hal`（feature `hc32l110b4pa`/`b6pa`/`b6ya`/`c4pa`/`c4ua`/`c6pa`/`c6ua`）实现了 DDL v2 精简端口布局的 GPIO：`Flex`/`Input`/`Output`/`OutputOpenDrain`，寄存器经 hc32-metapac typed 访问器操作（P0–P3 的 DIR/IN/OUT/ADS/DR/PU/PD/OD 与逐引脚 `Pxy_SEL`）。覆盖范围：
+
+- 数字输入/推挽输出/开漏输出，上下拉与驱动能力（PxDR 高/低档）配置；
+- embedded-hal 1.0 数字 trait；
+- 16 引脚封装（B 系列）不暴露未引出的 P03/P32/P33/P34，`init()` 按数据手册第 4 章表下注为其使能上拉。
+
+未覆盖：端口中断（HIE/LIE/RIE/FIE/STAT/ICLR，向量 PORT0–3）、复用功能编号 API、P00/RESETB 输入。HC32L110C6PA 的 `blinky` 和 `button_led` 已链接（覆盖 GPIO 输出翻转、输入上拉与有效电平），待板测；分频波形的输出侧由 `clock_div` 例程佐证（见 sysctrl 条目）。
+
+### HC32L110 sysctrl
+
+🧪 已编写待测试。`hc32-ddl-hal`（feature 同上）实现了 SYSCTRL `ddl_v2_2` 时钟驱动 `clock.rs`：RCH/XTH/RCL/XTL 四源配置与切换（RM 3.2.1 标准流程，含 SYSCTRL2 解锁、XTH 稳定后 10ms 软件延时、FLASH_CR.WAIT >24MHz 处理、RCH 换频逐级步进）、HCLK（1~128）/PCLK（1~8）分频、`clocks()` 频率快照、18 项外设门控、SysTick 参考时钟选择、HCLK/PCLK 波形输出（P24/P31，供 `clock_div` 例程观测）。本芯片无 PLL（DS/RM/SDK 三方一致）。覆盖范围：
+
+- `Config` 默认 = 复位态（RCH 4 MHz、不分频）；XTH 晶振按 DS 7.3.7 推荐驱动档、支持 P01 外部输入；XTL 32.768k 晶振/P14 外部输入；
+- RCH 4/8/16/22.12/24 MHz 出厂校准档位（flash 0x00100C00 区），运行中换频走 RM 3.2.7 方案 1 逐级步进；
+- 运行期单项开关：深度休眠唤醒用 RCH、XTL 常开、RTC 低功耗、RESET/SWD 引脚改 GPIO、时钟故障检测（SDK 定义，RM 位表缺失已登记差异台账）；
+- SYSTICK_CR 的 XTL/RCL/SystemClk/8/XTH 参考时钟与 STCALIB 读取。
+
+未覆盖：低功耗模式切换本身（WFI/DeepSleep 管理归后续 power 模块）、CLK_TRIM 中断绑定（IRQ31 归中断框架）。待 `clock_div.rs` 板测后升级 ✅。
+
+### HC32L110 clk_trim
+
+🧩 已编写缺例程。`hc32-ddl-hal` 的 `clk_trim.rs` 实现 CLKTRIM `ddl_v1`（RM 19 章）：校准模式阻塞测量（`calibrate_blocking` 返回 REFCNT/CALCNT 频率比，溢出返回 `None` 提示缩短校准时间）、监测模式（仅 XTH/XTL 被监测，`start_monitor` + `events()` 轮询 + `clear_faults`）。模块级 `CR.IE` 开关已提供，NVIC IRQ31 绑定留待中断框架。待例程与板测后升级 ✅。
