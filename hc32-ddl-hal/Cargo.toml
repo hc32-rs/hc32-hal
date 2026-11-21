@@ -8,6 +8,7 @@ description = "Hardware abstraction layer for HC32 DDL-series microcontrollers"
 [dependencies]
 hc32-metapac = { version = "0.1.0", path = "../../hc32-metapac", optional = true }
 embedded-hal = "1.0"
+embedded-hal-nb = "1.0"
 
 [features]
 rt = ["hc32-metapac/rt"]

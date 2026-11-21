@@ -64,15 +64,15 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | 外设 | HC32F072 | HC32F17x | HC32F19x | HC32F420 | HC32L021 | HC32L07x | HC32L110 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | adc | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| adt | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
+| adt | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | [🧪](#hc32l110-adt) |
 | aes | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
 | atim | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | bgr | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
-| bt | ➖ | ➖ | ➖ | ➖ | ➖ | ➖ | ⬜ |
+| bt | ➖ | ➖ | ➖ | ➖ | ➖ | ➖ | [🧪](#hc32l110-bt) |
 | btim | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | can | ⬜ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
 | clk_trim | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | [🧩](#hc32l110-clk_trim) |
-| crc | ⬜ | ⬜ | ⬜ | ⬜ | ➖ | ⬜ | ⬜ |
+| crc | ⬜ | ⬜ | ⬜ | ⬜ | ➖ | ⬜ | [🧪](#hc32l110-crc) |
 | ctrim | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | cts | ⬜ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
 | dac | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
@@ -88,11 +88,11 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | i2s | ⬜ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
 | iwdt | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | lcd | ➖ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
-| lptim | ➖ | ➖ | ➖ | ➖ | ➖ | ⬜ | ⬜ |
-| lpuart | ⬜ | ➖ | ➖ | ➖ | ⬜ | ⬜ | ⬜ |
+| lptim | ➖ | ➖ | ➖ | ➖ | ➖ | ⬜ | [🧪](#hc32l110-lptim) |
+| lpuart | ⬜ | ➖ | ➖ | ➖ | ⬜ | ⬜ | [🧪](#hc32l110-lpuart) |
 | lvd | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | opa | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
-| pca | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
+| pca | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | [🧪](#hc32l110-pca) |
 | pcnt | ➖ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
 | ram | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
 | reset | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
@@ -101,11 +101,11 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | sysctrl | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | [🧪](#hc32l110-sysctrl) |
 | tim | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
 | trng | ⬜ | ⬜ | ⬜ | ➖ | ⬜ | ⬜ | ➖ |
-| uart | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
+| uart | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | [🧪](#hc32l110-uart) |
 | usart | ➖ | ➖ | ➖ | ⬜ | ➖ | ➖ | ➖ |
 | usbfs | ⬜ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
 | vc | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| wdt | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
+| wdt | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | [🧪](#hc32l110-wdt) |
 | wwdt | ➖ | ➖ | ➖ | ⬜ | ➖ | ➖ | ➖ |
 
 ### HC32L12x 至 HC32L19x
@@ -424,3 +424,41 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 ### HC32L110 clk_trim
 
 🧩 已编写缺例程。`hc32-ddl-hal` 的 `clk_trim.rs` 实现 CLKTRIM `ddl_v1`（RM 19 章）：校准模式阻塞测量（`calibrate_blocking` 返回 REFCNT/CALCNT 频率比，溢出返回 `None` 提示缩短校准时间）、监测模式（仅 XTH/XTL 被监测，`start_monitor` + `events()` 轮询 + `clear_faults`）。模块级 `CR.IE` 开关已提供，NVIC IRQ31 绑定留待中断框架。待例程与板测后升级 ✅。
+
+### HC32L110 wdt
+
+🧪 已编写待测试。`hc32-ddl-hal` 的 `wdt.rs` 实现 WDT `ddl_v1`（RM 14 章）：16 档溢出时间（1.6 ms~52.4 s，`Period`）、溢出后复位或中断两种动作（`Config::reset`/`Config::interrupt`）、启动/喂狗序列（WDT_RST 依次写 0x1E、0xE1）、运行/中断/计数器状态查询、`RESET_FLAG.WDT` 复位原因查询与清除。构造时开启 PERI_CLKEN.WDT 门控。HC32L110C6PA 的 `wdt_reset_loop` 已链接（覆盖复位模式：溢出档 1.64 s、每 500 ms 喂狗不溢出、停止喂狗约 1.64 s 后溢出复位、复位后 `RESET_FLAG.WDT` 读出与清除；溢出档实际时长由停喂段计时核对）。NVIC #22 中断模式与 WOV=8 档 500 ms 标称值存疑（见差异台账）留待后续验证。待板测后升级 ✅。
+
+### HC32L110 crc
+
+🧪 已编写待测试。`hc32-ddl-hal` 的 `crc.rs` 实现 CRC `ddl_v1`（RM 20 章，仅 CRC_RESULT @0x04 与 CRC_DATA @0x80 两个寄存器，RM 20.5.1）：CRC-16（多项式 x¹⁶+x¹²+x⁵+1 = 0x1021，RM 20.2/20.3.2）、初值 0xFFFF（RM 20.4.1 第一步），构造时开启 PERI_CLKEN.CRC 门控（RM 3.5.8 位 26）。覆盖范围：
+
+- 编码模式（RM 20.4.1）：`init`（写 0xFFFF）→ `feed_bytes`/`feed_u16`/`feed_u32` 三种位宽写入（RM 20.3.3"位宽一致、先低后高"，值数组按小端序列化）→ `result`；`compute_*` 一步封装；
+- 校验模式（RM 20.3.1/20.4.2）：`check_bytes`/`check_u16`/`check_u32`，数据后以一次 16 位写追加校验值再读 FLAG；
+- 无中断（RM 第 20 章无中断资源，NVIC 未分配 CRC IRQ）。
+
+未覆盖/待板测：FLAG 判定机制、校验值追加位序、输入/输出是否反转及有无异或输出均 RM 未说明（见差异台账 HC32L110 CRC 条目，含 T1~T4 板测矩阵）；算法等价性 CRC-16/CCITT-FALSE（`"123456789"` → 0x29B1）属手册外推断。HC32L110C6PA 的 `crc` 例程已链接（覆盖 T1 位序、T2 FLAG 机制与篡改判定、T3 混宽一致性、T4 空序列初值，LED 指示结果），板测后升级 ✅。
+
+### HC32L110 bt
+
+🧪 已编写待测试。`hc32-ddl-hal` 的 `bt.rs` 实现 BT `ddl_v1`（RM 9 章，TIM0/1/2）：模式 2 十六位自动重载（`new_periodic` 按周期自动选预分频+重载，`new_mode2` 手动指定）与模式 1 三十二位自由计数（`new_free32`）、8 档预分频（1/2/4/8/16/32/64/256，编码 7 为 /256 非 2⁷ 连续）、外部事件计数（`new_counter`，EXT 下降沿，输入频率须低于采样时钟 1/2，采样上限手册两处矛盾见差异台账）、门控输入（引脚/UART RX 经 GPIO_CTRL4 `tmx_gate_sel`，极性可选）、TOG/TOGN 翻转输出（Buzzer/UART 波特率）、溢出中断（CR.IE，NVIC #14–16）。构造收尾统一停表、清 TF（ICLR 写 0 清除）、关门控、清 TOG_EN（复位值 0x8 该位为 1）。HC32L110C6PA 的 `timer_blinky` 已链接（覆盖模式 2 周期定时：2 Hz 溢出自动选档 Div32/ARR=3036、启停、轮询 TF、ICLR 写 0 清除；500 ms 间隔由实测核对）。待板测后升级 ✅。
+
+### HC32L110 lptim
+
+🧪 已编写待测试。`hc32-ddl-hal` 的 `lptim.rs` 实现 LPTIM `ddl_v1`（RM 10 章）：PCLK/XTL/RCL 三种计数时钟（TCK_SEL，XTL/RCL 可在深度休眠继续计时）、模式 2 重载与模式 1 自由计数、外部事件计数、门控（GPIO_CTRL4 `tm3_gate_sel`）、TOG 翻转输出、溢出中断（NVIC #17）。`set_reload` 遵守 WT_FLAG 写同步（等待同步完成再写 ARR，带超时）；`period_to_reload` 无条件限制 ARR < 0xFFFC（RM 10.2 中断丢失限制，纯轮询极短周期可直写 ARR 绕开）。WT_FLAG 复位初值行为手册未说明（差异台账已登记，上板首验项）。HC32L110C6PA 的 `lptim_blink` 已链接（覆盖 PCLK 时基模式 2 定时：62 Hz 溢出（ARR=1020，同时验证 ARR≥0xFFFC 拒绝区边界）× 31 次软件分频得 1 Hz 闪烁；构造即首次 `set_reload` 等待 WT_FLAG，上电即闪 = 复位后自置 1 首验通过，LED 常灭 = 超时停机需回填台账）。待板测后升级 ✅。
+
+### HC32L110 pca
+
+🧪 已编写待测试。`hc32-ddl-hal` 的 `pca.rs` 实现 PCA `ddl_v1`（RM 11 章）：16 位时基（PCLK 32/16/8/4/2 分频、TIM0/TIM1 溢出、ECI 外部时钟八选一）+ 5 个捕获/比较通道——边沿捕获（上升/下降/任意沿，来源可选 UART RX 经 GPIO_CTRL2）、16 位软件定时器、高速输出（匹配翻转，CCAPO 控初值）、8 位 PWM（先 CCAPxL 后 CCAPxH 写入以触发 ECOM 自动副作用；运行中改占空比写 CCAPxH 由硬件周期边界装载避免毛刺；注意 duty 数值与高电平占比反向，PWM 频率 = 时基/256）。CCAPMx 整字写入用 Ccapm0 同构布局组装；`set_interrupt` 走按通道 modify 只动 CCIE。CF/CCF0–4 标志清除采用"目标位写 0、其余位写 1"（RM 11.4.4 写 0 清除语义）。时基溢出中断 CMOD.CFIE、通道中断 CCAPMx.CCIE，共用 NVIC #21。CIDL 空闲语义手册内部矛盾（差异台账），模块 4 WDT 模式不在本驱动范围。HC32L110C6PA 的 `pca_pwm` 已链接（覆盖 PCLK/4 时基 + CH0 8 位 PWM：≈3.9 kHz 输出到 P23（SEL=4），`enable_pwm` 首周期占空比 + `set_duty` 运行中改 CCAPxH 缓存装载，呼吸灯 12.5%~87.5% 往返；duty 反向语义在 README 与例程头注明）。捕获/软件定时器/高速输出路径待后续例程。待板测后升级 ✅。
+
+### HC32L110 adt
+
+🧪 已编写待测试。`hc32-ddl-hal` 的 `adt.rs` 实现 ADT `ddl_v1`（RM 12 章，TIM4/5/6 = ADT0/1/2）：锯齿波 A/三角波 A/三角波 B 波形模式、8 档计数时钟（1/2/4/8/16/64/256/1024，无 /32 档）、比较输出（`enable_output` 直写 GCMAR/GCMBR + 缓存 GCMCR/GCMDR 与 BENA/BENB，运行中 `set_compare` 走缓存无毛刺；起停电平与周期点动作固定为低，匹配点可选）、捕获输入（CHxA/CHxB/TIMTRIA–D 六种端口 × 升/降沿，配对边沿位同步清零避免切换残留；捕获值与缓存镜像双读取）、周期缓存（PERBR + BENP，`set_period` 直写 PERAR 保证首周期正确）、软件同步启停清零（SSTAR/SSTPR/SCLRR 三通道共用）、刹车输出配置（`BrakeCondition` 四类无效条件 + `BrakeOutput` 端口状态）。中断 ICONR.INTENA–D/OVF/UDF（NVIC #18–20），标志清除 9 个定义位全写 1 仅目标位写 0（RM 12.3.25）。三角波周期系数 2×(PERAR+1) 待板测（差异台账）。互补 PWM 死区（DCONR）与正交编码、硬件同步、展频未实现。HC32L110C6PA 的 `adt_pwm` 已链接（覆盖 ADT0 锯齿波 PWM：`new_pwm` 1 kHz 自动选档 Div1/PERAR=3999、`enable_output` 直写+缓存、`set_compare` 运行中改 GCMCR 溢出点装载，CHxA 输出到 P23（SEL=3），呼吸灯亮占比 10%~90% 往返）。三角波/捕获/软件同步路径待后续例程。待板测后升级 ✅。
+
+### HC32L110 uart
+
+🧪 已编写待测试。`hc32-ddl-hal` 的 `uart.rs` 实现 UART `ddl_v1`（RM 15 章，UART0/1）：Mode1（10 位异步）/Mode2（11 位固定波特率 (DBAUD+1)·PCLK/64）/Mode3（11 位可变波特率）阻塞收发，波特率由 TIM0（UART0）/TIM1（UART1）16 位自动重载 TOG 供给（CNT 与 ARR 同写装载值），Mode3 第 9 位支持软件奇偶校验（TB8/RB8）与多机通信（SM2 + SADDR/SADEN 地址识别）。阻塞发送"清 TI → 写 SBUF → 忙等 TI"（RM 15.8.2 发送无缓存）；接收轮询 RI 并检查 FE（ICR 目标位写 0、其余位写 1，写 0 清除写 1 无效，RM 15.9.6）。引脚复用经 `gpio::set_pin_af`（P01/P02/P14/P15/P23/P24/P27/P31/P35/P36，TX 输出/RX 输入），embedded-hal-nb 1.0 `serial::Read/Write`（`nb::Result`，未就绪返回 WouldBlock；Write 为阻塞语义）。Mode0 同步半双工未实现。HC32L110C6PA 的 `uart1_echo` 已链接（覆盖 UART1 Mode1 阻塞收发回环：P35 TXD/P36 RXD（SEL 1）、RCH 22.12 MHz 下 115200（TM=65530，实际 115208.33，+0.01%）、阻塞 read→write 回显；TOG_EN=0 下内部 tog1 供给波特率为差异台账待验证项）。待板测后升级 ✅。
+
+### HC32L110 lpuart
+
+🧪 已编写待测试。`hc32-ddl-hal` 的 `uart.rs` 同文件实现 LPUART `ddl_v1`（RM 16 章，单实例 0x4000_0200）：普通模式（LPMODE=0）与 UART 同构但波特率由 TIM2 TOG 供给（须开 BT2.CR.TOG_EN，RM 16.4.3 注；SCLK≠PCLK 的定时器模式因 TIM2 只能按 PCLK 计数而被拒绝，RM 9.4.4 CT=0，正确单位 RM 未说明）；低功耗模式（LPMODE=1）波特率固定档 `f_SCLK/(2^(7-PRS)·4)`、仅支持 Mode1/3、不占用定时器，DeepSleep 可收发。SCLK 可选 PCLK/XTL/RCL（SCON.SCLKSEL；RCL 档位读 RCL_CR.TRIM 区分 38.4k/32.768k 属未验证推断，RM 3.5.6 未说明映射，见差异台账）。收发序列、软件校验、多机通信与 UART 侧一致；发送有 1 帧缓存（ISR.TE，极性手册两处描述相反，差异台账）。引脚 P25/P26（20 脚封装另有 P33 RX/P34 TX）。HC32L110C6PA 的 `lpuart_echo` 已链接（覆盖 LPUART 普通模式 Mode1 阻塞收发回环：P26 TXD/P25 RXD（SEL 5）、SCLK=PCLK、RCH 22.12 MHz 下 115200（TIM2 占用并开 TOG_EN，TM=65530，实际 115208.33））。待板测后升级 ✅。

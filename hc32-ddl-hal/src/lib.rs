@@ -25,9 +25,14 @@ compile_error!(
     "hc32-ddl-hal: 请启用恰好一个芯片 feature，例如 hc32-ddl-hal = { features = [\"hc32l110c6ua\"] }"
 );
 
+pub mod adt;
+pub mod bt;
 pub mod clk_trim;
 pub mod clock;
+pub mod crc;
 pub mod gpio;
+pub mod lptim;
+pub mod pca;
 mod peripheral;
 pub mod peripherals;
 #[cfg(feature = "hc32l110")]
@@ -35,6 +40,9 @@ pub mod pac {
     //! 当前芯片的寄存器访问层。
     pub use hc32_metapac::*;
 }
+
+pub mod uart;
+pub mod wdt;
 
 mod time;
 pub use time::Hertz;

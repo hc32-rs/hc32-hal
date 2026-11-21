@@ -114,6 +114,28 @@ pub struct Peripherals {
     pub P34: Peri<'static, P34>,
     pub P35: Peri<'static, P35>,
     pub P36: Peri<'static, P36>,
+    /// 基本定时器 TIM0。
+    pub BT0: Peri<'static, crate::bt::Bt0>,
+    /// 基本定时器 TIM1。
+    pub BT1: Peri<'static, crate::bt::Bt1>,
+    /// 基本定时器 TIM2。
+    pub BT2: Peri<'static, crate::bt::Bt2>,
+    /// 低功耗定时器。
+    pub LPTIM: Peri<'static, crate::lptim::LpTim>,
+    /// 可编程计数阵列。
+    pub PCA: Peri<'static, crate::pca::PcaPeri>,
+    /// 高级定时器 TIM4。
+    pub ADT0: Peri<'static, crate::adt::Adt0>,
+    /// 高级定时器 TIM5。
+    pub ADT1: Peri<'static, crate::adt::Adt1>,
+    /// 高级定时器 TIM6。
+    pub ADT2: Peri<'static, crate::adt::Adt2>,
+    /// UART0。
+    pub UART0: Peri<'static, crate::uart::Uart0>,
+    /// UART1。
+    pub UART1: Peri<'static, crate::uart::Uart1>,
+    /// 低功耗 UART。
+    pub LPUART: Peri<'static, crate::uart::LpUartPeri>,
 }
 
 static TAKEN: AtomicBool = AtomicBool::new(false);
@@ -160,6 +182,17 @@ impl Peripherals {
                 P34: P34::steal(),
                 P35: P35::steal(),
                 P36: P36::steal(),
+                BT0: crate::bt::Bt0::steal(),
+                BT1: crate::bt::Bt1::steal(),
+                BT2: crate::bt::Bt2::steal(),
+                LPTIM: crate::lptim::LpTim::steal(),
+                PCA: crate::pca::PcaPeri::steal(),
+                ADT0: crate::adt::Adt0::steal(),
+                ADT1: crate::adt::Adt1::steal(),
+                ADT2: crate::adt::Adt2::steal(),
+                UART0: crate::uart::Uart0::steal(),
+                UART1: crate::uart::Uart1::steal(),
+                LPUART: crate::uart::LpUartPeri::steal(),
             }
         }
     }

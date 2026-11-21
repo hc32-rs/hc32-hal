@@ -141,3 +141,123 @@
 | 验证状态 | 待验证（若需 1kHz~1MHz 输入再按 DS 放宽并参数化频率） |
 
 
+
+## HC32L110 · WDT · WOV=8 档溢出时间标称值可疑
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，WDT `ddl_v1`，`WDT_CON.WOV` 编码 8 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 14.3.2 WOV 字段表：编码 8 标称 **500ms**；其余 15 档（1.6ms~52.4s）全部符合 1.6ms × 2ⁿ 规律，按规律编码 8 应约 **410ms**（1.6 × 2⁸）；`DS_HC32L110系列数据手册_Rev2.80` 表 7-13 仅给出总范围 1.6~52000ms，无法仲裁 |
+| SDK 依据 | 同代 `xh_ddl_sdk/HC32F003_DDL_Rev2.0.0/driver/inc/wdt.h`（`wdt_ddl_v1_1` 同族寄存器）：`WdtT500ms = 8u ///<500ms`，同样标 500ms；HC32L110 SDK `wdt.h` 无档位枚举（`u8LoadValue` 由用户填写），无独立证据 |
+| HAL 处理 | `hc32-ddl-hal/src/wdt.rs` `Period::Ms500` 按手册文本标称 500ms 提供；若实测为 410ms，改枚举名与文档即可（编码不变） |
+| 验证状态 | 待验证（板测：WOV=8 启动后不复位喂狗计时，或示波器量测中断模式周期） |
+
+## HC32L110 · CRC · FLAG 判定机制与校验值追加位序手册未说明
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，CRC `ddl_v1` |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 20.5.2 仅定义 FLAG 位 0/1 含义（0 错误 1 正确），比较机制（内部残差与固定常数比较，或与末次写入值比较）、FLAG 生效时刻均未说明；20.3.3 位宽原则只给单一宽度示例，无"数据写入后接 16 位校验值写"的混宽序列示例；输入/输出是否反转、有无异或输出未说明（算法等价性推断：多项式 0x1021 + 初值 0xFFFF + 不反转 = CRC-16/CCITT-FALSE，`"123456789"` → 0x29B1，属手册外推断） |
+| SDK 依据 | `driver/src/crc.c` `CRC16_Check8/16/32`：数据按 8/16/32 位写后，均以一次 16 位写追加校验值，随后立即读 FLAG，无等待；`CRC16_Get8/16/32` 与 RM 20.4.1 步序一致 |
+| HAL 处理 | `hc32-ddl-hal/src/crc.rs` 校验序列与 RM 20.3.1/20.4.2 步序及 SDK 一致（数据 → 一次 16 位写追加 → 读 FLAG）；模块文档将算法位序等价性与 FLAG 机制标注"手册未说明，待板测"。STK 例程按板测矩阵验证：T1 位序（0x29B1 → 非反射位序成立）、T2 FLAG 机制（RESULT 残差值 + FLAG 行为）、T3 混宽一致性、T4 空序列初值 |
+| 验证状态 | 待验证（hc32l110-stk 板测后更新本条与驱动文档；若判定需改 `append_crc` 追加方式，涉及硬件行为修订，交回审阅复核） |
+
+## HC32L110 · BT · 外部计数输入采样上限两处描述不一致
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，BT `ddl_v1`，计数模式（CR.CT = 1）外部输入频率上限 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 9.4.4 CR.CT 字段："外部输入时钟频率要低于 **1/2 采样时钟**"；同手册 9.2.1 计数功能正文："外部输入时钟频率不能超过系统的 Pclk 时钟"——手册内部矛盾（1/2 PCLK vs 1×PCLK） |
+| SDK 依据 | `driver/inc/bt.h` 无频率上限说明；SDK 示例亦未标注 |
+| HAL 处理 | `hc32-ddl-hal/src/bt.rs` `new_counter` 文档按更严格的 9.4.4 字段描述（低于采样时钟 1/2）标注，行为安全 |
+| 验证状态 | 待验证（高频率外部脉冲上板计数比对；若实测允许接近 PCLK 再放宽文档） |
+
+## HC32L110 · LPTIM · WT_FLAG 复位初值与置位时序手册未说明
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，LPTIM `ddl_v1`，首次写 ARR 前的写同步等待 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 10.4.2 ARR 字段："写 ARR 前需要读取 CR.WT_FLAG，当且尽当 WT_FLAG 为 1 时，写入时才能写入数据"（正文另将该标志写作"WT2_FLAG"，与 10.4.3 位表的"WT_FLAG"命名不一致，疑为同一标志的笔误）；10.4.3 CR 复位值 0x0000_0008 → 位 7 WT_FLAG 复位为 **0**；复位后硬件是否/何时自行将该位置 1 手册未说明 |
+| SDK 依据 | `driver/src/lpt.c` `Lpt_ARRSet`：读 WT_FLAG，为 1 才写 ARR，否则直接返回 Error，无等待；SDK `Lpt_Init` 流程未显式处理复位初值 |
+| HAL 处理 | `hc32-ddl-hal/src/lptim.rs` `set_reload` 等待 WT_FLAG = 1（带 1e6 次循环超时，超时 panic，防死循环）；若复位后 WT_FLAG 不自行置 1，首次配置将超时 panic——上板首验项 |
+| 验证状态 | 待验证（上电后立即读 CR.WT_FLAG 确认初值与置位时序；若确不自置 1，改用 SDK 式试探写+回读方案并交回复核） |
+
+## HC32L110 · PCA · CMOD.CIDL 空闲模式语义手册内部矛盾
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，PCA `ddl_v1`，空闲模式下时基计数行为 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 11.4.2 CMOD 位 7："CIDL 1: 休眠模式(sleep)下，PCA **停止**工作；0: 继续工作"；同手册 11.2.1："当 CMOD.CIDL 置'1'后，PCA 定时器/计数器可以**继续运行**在空闲模式下"——两处完全相反 |
+| SDK 依据 | `driver/inc/pca.h` 的 `stc_pca_cmod_cfg_t` 注释仅照抄位表语义，无独立证据 |
+| HAL 处理 | `hc32-ddl-hal/src/pca.rs` `set_idle_halt` 文档按 11.4.2 位描述（CIDL=1 停止）标注 |
+| 验证状态 | 待验证（空闲模式实验：CIDL 置 1/0 各测一次 CNT 是否递增后定论，更新驱动文档） |
+
+## HC32L110 · ADT · 三角波周期系数手册未给出公式
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，ADT `ddl_v1`，三角波模式周期换算 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 12.3.2 PERAR："计数周期值，设定每轮计数的计数周期值"，未给周期公式；12.2.1.1 图 12-3 三角波波形（md 转换为图片无法文本核验） |
+| SDK 依据 | SDK `adt.h` 无周期换算 API |
+| HAL 处理 | `hc32-ddl-hal/src/adt.rs` `period_to_perar`/`perar_to_period` 三角波按 **2×(PERAR + 1)** 节拍换算（峰+谷合计；锯齿波 (PERAR+1) 节拍为自然读法且与复位值 0xFFFF→65536 节拍自洽） |
+| 验证状态 | 待验证（示波器测三角波周期核对 2×(PERAR+1)；若不符修 scale 并交回复核） |
+
+## HC32L110 · LPUART · ISR.TE 语义两处描述相反
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，LPUART `ddl_v1`，发送缓存空标志 ISR.TE（位 3） |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 16.9.5 ISR.TE 字段："当该位值为 0 时，硬件自动屏蔽软件写 SBUF 操作"（TE=0 屏蔽写、TE=1 可写）；但 16.8.2 发送数据流程的正文表述与之相反（"TE=1 期间屏蔽写"），手册内部矛盾。复位值 0x0000_0008（TE=1）与字段名"发送缓存空"支持 16.9.5 的读法 |
+| SDK 依据 | `driver/src/lpuart.c` `LPUart_SendData`（570–580 行）发送前清 TI 后直接写 SBUF 并忙等 TI，未轮询 TE；`LPUart_GetStatus(LPUartTxEmpty)` 判定的是 ISR.TI（524–526 行）而非 TE；SDK 无 TE 判定代码可佐证 |
+| HAL 处理 | `hc32-ddl-hal/src/uart.rs` 阻塞发送按 SDK 序列（清 TI → 写 SBUF → 忙等 TI），不依赖 TE 判定，两读法下行为一致；文档按 16.9.5（TE=1 可写）标注 |
+| 验证状态 | 待验证（发送中轮询 TE 观察翻转时点上板定论；驱动当前不依赖 TE，无功能风险） |
+
+## HC32L110 · UART/LPUART · SDK 引脚宏附带上下拉而手册未要求
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，UART0/1 与 LPUART 的 TX/RX 引脚复用配置 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 表 6-2 与逐引脚 SCON 描述：复用仅需 PxADS=0、Pxy_SEL 编码、方向位，未要求任何上/下拉 |
+| SDK 依据 | `driver/inc/gpio.h` 个别宏附带额外动作：`Gpio_SetFunc_UART0TX_P35` 额外置 P3PU.P35=1（上拉），`Gpio_SetFunc_UART1RX_P36` 额外置 P3PD.P36=1（下拉）；其余 UART/LPUART 宏（如 UART1TX_P23/UART1RX_P24/UART2RX_P25）均不带上下拉 |
+| HAL 处理 | `hc32-ddl-hal/src/uart.rs` 经 `gpio::set_pin_af` 按 RM 只做 ADS/SEL/方向，不自动加上/下拉；`Config::tx_pull`/`rx_pull` 提供显式配置位（默认 None），需要 SDK 行为的用户可自行设置 |
+| 验证状态 | 待验证（115200 回环收发正常即可视为无影响；波特率容差与引脚上下拉无关联） |
+
+## HC32L110 · LPUART · 波特率计算 SDK 无四舍五入且手册表与公式偶有偏差
+
+| 字段 | 记录内容 |
+| | --- |
+| 适用范围 | DDL，HC32L110 全型号，LPUART `ddl_v1`，Mode1/3 定时器装载值计算 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 16.4.3：`Baud = (DBAUD+1)·f_SCLK / (32·(65536−TM))`，未规定舍入方式；15.4.2.1 波特率表在部分频率档与公式重算值存在 ±1 LSB 级偏差（表值取整方式未说明） |
+| SDK 依据 | `driver/src/uart.c` `Uart_SetBaudRate`（449 行）float 计算 +0.5 四舍五入；`driver/src/lpuart.c` `LPUart_SetBaudRate`（424 行）整数除法**无** +0.5（向零截断），同一 SDK 内两驱动舍入策略不一致 |
+| HAL 处理 | `hc32-ddl-hal/src/uart.rs` `timer_load` 统一按四舍五入（`(num + baud·16)/(baud·32)`，整数实现）实现，UART/LPUART 一致；误差 ≤ 半个定时器节拍，远小于波特率容差 |
+| 验证状态 | 待验证（回环例程以实际波特率误差 ≤3% 为通过标准） |
+
+## HC32L110 · UART · UART0/1 波特率互联是否受 TOG_EN 门控手册未说明
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，UART `ddl_v1` + BT `ddl_v1`，Mode1/3 波特率供给 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 15.1/9.3.2："TIM0 的翻转输出 tog0 到内部模块 UART0，控制 UART0 的波特率"，未提及 TOG_EN；9.4.4 TOG_EN 字段描述"TOG 输出使能，0:TOG,TOGN 同时输出 0"按字面读连 TOG 本体也关断——tog0 内部互联取自 TOG_EN 门控之前还是之后，手册未说明；对照 16.1 注明确要求 LPUART "必须使能 TIMER2 的 Toggle 输出"，若 UART0/1 同样需要 TOG_EN=1，手册未在 15 章作同等说明（手册未说明） |
+| SDK 依据 | `example/uart/uart_int/source/main.c` 165-170 行：`stcBtConfig` 只设 enMD/enCT，enTog 未初始化（局部变量初值 0），Bt_Init 后 UART1 正常收发——SDK 行为证明 UART0/1 波特率在 TOG_EN=0 下仍产生 |
+| HAL 处理 | `hc32-ddl-hal/src/uart.rs` UART0/1 侧保持 `tog_en(false)`（复位值），LPUART 侧按 RM 16.1 注置 `tog_en(true)`；注释如实标注"手册未说明，按 SDK 例程行为" |
+| 验证状态 | 待验证（上板确认 TOG_EN=0 下 UART0/1 可通信；若不可通信则改置 true 并交回复核） |
+
+## HC32L110 · UART · FE 与 RI/TI 的并发关系手册未说明
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，UART/LPUART `ddl_v1`，帧错误的标志交互 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 15.5/16.5：FE 硬件置位、软件清零，未及时清零时"后续收到数据即使带有效 Stop 位，也不会把 FE 标志清 0"——仅描述 FE 自身；错误帧是否同时置 RI、FE=1 是否阻碍后续帧置 RI，手册未说明 |
+| SDK 依据 | `driver/src/uart.c` `Uart_IRQHandler`（655-690 行）按 FE→RI→TI 顺序查标志、FE 置位时清 FE 后直接 return（暗示错误帧也可能置 RI，需先排掉）；`Uart_ReceiveData` 无 FE 检查 |
+| HAL 处理 | `hc32-ddl-hal/src/uart.rs` 接收路径假定错误帧同时置 RI：忙等 RI → 查 FE → 丢弃并同清 FE/RI；若实测错误帧不置 RI，FE 帧将被滞留至下一有效帧才被发现，行为仍安全（不丢有效数据），但错误上报延迟一帧 |
+| 验证状态 | 待验证（错误波特率注入错误帧，观察 RI/FE 置位时序后更新本条） |
+
+## HC32L110 · UART · RCL 38.4k/32.768k 档位的 TRIM 判别手册未提供
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L110 全型号，LPUART `ddl_v1`，`Sclk::Rcl` 的频率取值 |
+| 手册依据 | `RM_HC32L110系列参考手册_Rev2.50` 3.5.6 RCL_CR：TRIM（位 9:0）调整频率，Flash 0x00100C20/0x00100C22 起存两组校准值；**TRIM 值与标称频率的映射手册未说明**（两地址与 38.4k/32.768k 的对应关系为推断） |
+| SDK 依据 | `driver/src/clk.c` `Clk_GetRClkFreq`：读 RCL_CR_f.TRIM 判 bit9，为 1 判 38.4k、为 0 判 32.768k；SDK 同样未给出文档依据 |
+| HAL 处理 | `hc32-ddl-hal/src/uart.rs` `Sclk::frequency` 按 SDK 同款判别（bit9 区分），文档标注"未验证推断"；影响 LPMODE=0（已被拒绝的 SCLK≠PCLK 组合不受影响）与 `low_power_baudrate()` 返回值 |
+| 验证状态 | 待验证（RCL 双档位实测波特率或示波器测 RCL_OUT 引脚频率后更新本条） |

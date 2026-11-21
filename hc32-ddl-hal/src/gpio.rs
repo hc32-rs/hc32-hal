@@ -350,6 +350,27 @@ fn set_sel(n: PinNumber, func: u8) {
     }
 }
 
+/// 把引脚切到数字复用功能（Pxy_SEL = af，PxADS = 0）。
+///
+/// `input` 选择方向：接收脚（RXD 等）为输入，发送脚（TXD 等）为输出。
+/// 通信外设驱动按其引脚 trait 提供的复用编号调用；GPIO 驱动本身只用
+/// `set_sel(n, 0)` 回到 GPIO 功能。
+///
+/// 先打开 GPIO 门控（PERI_CLKEN 位 28 复位为 0，RM 3.5.8；门控关闭时
+/// 对 GPIO 寄存器的写入不生效），幂等。
+pub(crate) fn set_pin_af(n: PinNumber, af: u8, input: bool, pull: Pull) {
+    crate::clock::enable_gpio();
+    // SDK 复用宏的固定动作序列：ADS 清零 → SEL 写功能号 → DIR 按信号方向
+    // （driver/inc/gpio.h 的 Gpio_SetFunc_* 系列）。上/下拉由驱动按需配置。
+    set_ads(n, false);
+    set_dr(n, false);
+    set_od(n, false);
+    set_pd(n, matches!(pull, Pull::Down));
+    set_pu(n, matches!(pull, Pull::Up));
+    set_dir(n, input);
+    set_sel(n, af);
+}
+
 // ---------------------------------------------------------------------------
 // Flex
 // ---------------------------------------------------------------------------
