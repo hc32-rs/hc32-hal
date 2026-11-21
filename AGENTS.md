@@ -20,7 +20,14 @@
 | `src/<模块名>/<功能>.rs` | 模块内可以独立描述的功能，如 `uart/buffered.rs`、`timer/pwm.rs`。 |
 | `src/<模块名>/<kind>_<版本>.rs` | 确需不同寄存器操作时，放置私有 IP 实现。文件名取上游寄存器类型和版本，在 crate 内省略 `ddl_` 或 `ll_` 前缀，保留完整数字后缀。例如 HC32L110 的 `CLOCK` 映射为 `sysctrl/ddl_v2_2`，分拆时对应 `clock/sysctrl_v2_2.rs`。 |
 
-先用单文件实现首个目标。多个 IP 版本的寄存器访问和硬件行为一致时共用实现。按实例或工作模式选择版本，同一颗芯片也可能有多种布局，例如 HC32A448 的 ADC1 和 ADC2。版本选择留在驱动内部，应用通过 `adc::` 等公开模块使用。
+首个 IP 可以用单文件。接入第二种寄存器布局时，把沿用的公开类型、构造函数和 embedded-hal trait 实现保留在模块入口，把有差异的寄存器操作移到私有 IP 文件。经核对寄存器和硬件语义一致的操作可以共用。按实例或工作模式选择版本，同一颗芯片也可能有多种布局，例如 HC32A448 的 ADC1 和 ADC2。
+
+### 从具体型号选择驱动
+
+- 应用只选择一个完整料号的 Cargo feature。构建时从该型号的 PAC 元数据读取已实现外设实例的 `registers.kind` 和完整 `registers.version`，据此选择后端。按已适配的实例及其依赖一起开放驱动模块和 `Peripherals` 字段。芯片拥有某个 IP 仅说明寄存器布局，驱动还可能依赖另一个定时器、时钟源或引脚路由。
+- GPIO 与系统控制器分别选择后端。例如 HC32L110 使用 `gpio/ddl_v2` 和 `CLOCK → sysctrl/ddl_v2_2`，HC32L130 使用 `gpio/ddl_v3_3` 和 `SYSCTRL → sysctrl/ddl_v3_1`。公开的 `gpio::Input`、`gpio::Output` 等类型沿用现有路径。引脚身份要能无歧义地表示端口和位号，例如 L130 的 PA15 与 PB07。
+- IP 后端负责寄存器访问，封装决定可发放的引脚和未引出脚的上电处理。按完整料号核对 DS 引脚表。PAC 缺少封装引脚数据时，可维护一份带手册出处的映射，由它派生引脚类型、集合字段和构造。每项封装初始化明确匹配适用型号，尤其要核对复位脚、调试脚与 GPIO 模拟模式的默认状态。
+- 默认时钟路径按各型号的复位条件实现，区分时钟源和分频、出厂校准、GPIO 门控三件事，并核对厂商启动代码在 Rust 启动路径中是否执行。仅接入默认时钟的型号只开放已实现的时钟能力。扩展型号时保持既有型号的时钟配置 API 和板级行为。
 
 芯片的实例、引脚复用和中断映射优先来自 PAC 元数据。确需手写的系列差异就近放在所属模块，例如时钟树特例放在 `clock/<系列名>.rs`。开发板上的 LED、按键、接线和晶振选型归入对应板级例程。
 
@@ -65,13 +72,12 @@ DS 和 UM/RM 平时阅读优先使用同名 `.md`（MinerU 转换产物，与 PD
 
 ## 验证
 
-在本仓库根目录运行：
+在本仓库根目录检查格式，并以一个具体型号交叉编译 DDL HAL。例如：
 
 ```sh
 cargo fmt --all -- --check
-cargo check --workspace
-cargo check -p hc32-ddl-hal --target thumbv6m-none-eabi
+cargo check -p hc32-ddl-hal --target thumbv6m-none-eabi --no-default-features --features hc32l110c6pa
 cargo check -p hc32-ll-hal --target thumbv7em-none-eabihf
 ```
 
-上述两个嵌入式目标用于检查初始骨架。引入芯片 feature 后，按受影响型号选择匹配的 Rust target 和单个芯片 feature，分别检查对应 crate。
+修改型号选择、封装表或 IP 后端时，逐个编译所有受影响的完整料号，并验证零型号和同时选择两个型号都有清楚的诊断。在已有的受影响板包目录执行 `cargo build --bins --release` 验证最终链接。新系列还没有板包时，用临时最小程序验证默认初始化和公开 GPIO API 的目标链接；支持表分别记录编译、链接和板测证据。
