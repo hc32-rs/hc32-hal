@@ -123,7 +123,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | debug_active | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | dmac | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | flash | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| gpio | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
+| gpio | ⬜ | [🧩](#hc32l13x-gpio) | ⬜ | ⬜ | ⬜ | ⬜ |
 | hdiv | ➖ | ⬜ | ➖ | ➖ | ➖ | ➖ |
 | hsi2c | ⬜ | ➖ | ➖ | ➖ | ➖ | ➖ |
 | i2c | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -139,7 +139,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | reset | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | rtc | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | spi | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| sysctrl | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
+| sysctrl | ⬜ | [🧩](#hc32l13x-sysctrl) | ⬜ | ⬜ | ⬜ | ⬜ |
 | tim | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | trng | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
 | uart | ➖ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
@@ -462,3 +462,11 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 ### HC32L110 lpuart
 
 🧪 已编写待测试。`hc32-ddl-hal` 的 `uart.rs` 同文件实现 LPUART `ddl_v1`（RM 16 章，单实例 0x4000_0200）：普通模式（LPMODE=0）与 UART 同构但波特率由 TIM2 TOG 供给（须开 BT2.CR.TOG_EN，RM 16.4.3 注；SCLK≠PCLK 的定时器模式因 TIM2 只能按 PCLK 计数而被拒绝，RM 9.4.4 CT=0，正确单位 RM 未说明）；低功耗模式（LPMODE=1）波特率固定档 `f_SCLK/(2^(7-PRS)·4)`、仅支持 Mode1/3、不占用定时器，DeepSleep 可收发。SCLK 可选 PCLK/XTL/RCL（SCON.SCLKSEL；RCL 档位读 RCL_CR.TRIM 区分 38.4k/32.768k 属未验证推断，RM 3.5.6 未说明映射，见差异台账）。收发序列、软件校验、多机通信与 UART 侧一致；发送有 1 帧缓存（ISR.TE，极性手册两处描述相反，差异台账）。引脚 P25/P26（20 脚封装另有 P33 RX/P34 TX）。HC32L110C6PA 的 `lpuart_echo` 已链接（覆盖 LPUART 普通模式 Mode1 阻塞收发回环：P26 TXD/P25 RXD（SEL 5）、SCLK=PCLK、RCH 22.12 MHz 下 115200（TIM2 占用并开 TOG_EN，TM=65530，实际 115208.33））。待板测后升级 ✅。
+
+### HC32L13x gpio
+
+🧩 已编写缺例程。`hc32-ddl-hal`（feature `hc32l130e8pa`/`f8ua`/`j8ta`/`j8ua`）实现了 DDL v3_3 端口阵列布局的 GPIO 寄存器后端（`gpio/gpio_v3_3.rs`：PA–PD 的 DIR/IN/OUT/ADS/DR/PU/PD/OD 与逐引脚 `Pxy_SEL`），并按 DS Rev2.20 表 3-2 建立四个料号的引脚单例（`peripherals/peripherals_l130.rs`）：TSSOP28 引出 PA00~PA14、PB00~PB02、PC14/PC15、PD00/PD01/PD03（23 IO），QFN32 引出 26 IO，LQFP48/QFN48 引出 40 IO；未引出脚不发放且 `init()` 按 SDK `_HidePinInit` 掩码配为数字输入并上拉。`init()` 期间临时打开 PERI_CLKEN 位 28 门控、处理完恢复原值（SDK 同做法）。数字输入/输出的公开 API 与 embedded-hal trait 为 L110 版本共享入口，L13x 侧的数字读写验证随下一步例程落地。PD03/BOOT0 按引脚表发放（复位时为 ISP 采样脚）；PA13/PA14 默认为 SWD 调试脚，作 GPIO 需后续开放 SWD_USE_IO 开关。四个料号均通过 `cargo check` 与临时 no_std 程序的目标链接（引出脚可从 `Peripherals` 取得，未引出脚编译失败），待板测后升级 ✅。
+
+### HC32L13x sysctrl
+
+🧩 已编写缺例程。`hc32-ddl-hal` 实现了 SYSCTRL `ddl_v3_1` 默认初始化（`clock/sysctrl_v3_1.rs`）：`init(Config::default())` 对齐厂商 `SystemInit` 的默认时钟路径——装载 RCH 出厂校准 TRIM（flash 0x00100C08，4 MHz 档，RM 3.1.1/3.5.4）与 RCL 出厂校准 TRIM（flash 0x00100C22，32.768 kHz 档，RM 3.5.6，不开源）；Rust 启动路径不执行厂商启动代码，这两步是复位态之上唯一需要的软件动作。装载后系统时钟保持复位默认：RCH 4 MHz，HCLK = PCLK = 4 MHz（SYSCTRL0 复位值 0x0000_0001，RM 3.5.1），与 `clocks()` 快照一致。可配置时钟树（RM 3.2 的 5 源切换含 PLL、门控 API）未接入，型号只开放已实现能力；L110 的可配置时钟行为不受影响。待时钟 API 扩展与板测后升级 ✅。

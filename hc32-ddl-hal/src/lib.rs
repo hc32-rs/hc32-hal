@@ -12,18 +12,24 @@
 //! );
 //! ```
 //!
-//! 启用恰好一个芯片 feature（如 `hc32l110c6ua`）选择目标型号。构建期
-//! 由 build.rs 从该料号的 PAC 元数据读取外设实例的 `registers.kind`
-//! 与 `registers.version`，派生后端 cfg（如 `gpio_ddl_v2`、
-//! `sysctrl_ddl_v2_2`）与实例 cfg（`peri_uart0` 等），据此开放驱动
-//! 模块与 [`Peripherals`] 字段。应用只选完整料号，不感知 IP 后端。
+//! 启用恰好一个芯片 feature（如 `hc32l110c6ua`、`hc32l130j8ta`）选择
+//! 目标型号。构建期由 build.rs 从该料号的 PAC 元数据读取外设实例的
+//! `registers.kind` 与 `registers.version`，派生后端 cfg（如
+//! `gpio_ddl_v2`、`sysctrl_ddl_v2_2`）与实例 cfg（`peri_uart0` 等），
+//! 据此开放驱动模块与 [`Peripherals`] 字段。应用只选完整料号，不感知
+//! IP 后端。
 //!
-//! [`Config::clock`] 配置时钟树；不配置时芯片运行在复位默认的内部高速
-//! RCH（4 MHz，HCLK = PCLK = 4 MHz），与不触碰时钟树的行为一致。
+//! 时钟能力按型号开放：HC32L110 的 [`Config::clock`] 可配置时钟树
+//! （RCH 档位/晶振/分频，不配置时保持复位默认 RCH 4 MHz）；HC32L13x
+//! 当前只接入默认路径（`init` 内装载 RCH/RCL 出厂 TRIM，系统时钟保持
+//! 复位默认 RCH 4 MHz，HCLK = PCLK = 4 MHz）。
 
 #![no_std]
 // 零料号：所有驱动模块都被 cfg 关闭，死代码警告无意义。
 #![cfg_attr(not(feature = "_chip-selected"), allow(unused))]
+// L130 仅接入默认初始化与引脚单例，数字 GPIO 读写（set_out/read_in 等
+// 后端原语）由下一步实现 trait 时启用，暂留的未用告警在此关闭。
+#![cfg_attr(feature = "hc32l130", allow(unused))]
 
 // 零料号：所有驱动模块都被 cfg 关闭，此诊断是唯一输出。
 #[cfg(not(feature = "_chip-selected"))]
@@ -39,9 +45,17 @@ pub use hc32_metapac as pac;
 // build.rs 从当前料号的 PAC 元数据派生，GPIO 与 SYSCTRL 独立选择后端
 // （AGENTS.md「从具体型号选择驱动」）。组合依赖在 build.rs 的
 // DRIVER_BACKENDS 核对后才会发出对应后端 cfg。
+// - L110：sysctrl 驱动写晶振引脚（GPIO）与 FLASH 等待周期（FLASH），
+//   三个实例 cfg 都在；
+// - L130：FLASH 布局为 ddl_v3_2（未适配驱动），sysctrl 驱动不触碰
+//   FLASH 寄存器，后端依赖表相应只要求 GPIO。
 #[cfg(all(sysctrl_ddl_v2_2, peri_clock, peri_flash, peri_gpio))]
 pub mod clock;
+#[cfg(all(sysctrl_ddl_v3_1, peri_sysctrl, peri_gpio))]
+pub mod clock;
 #[cfg(all(gpio_ddl_v2, sysctrl_ddl_v2_2, peri_gpio))]
+pub mod gpio;
+#[cfg(all(gpio_ddl_v3_3, sysctrl_ddl_v3_1, peri_gpio))]
 pub mod gpio;
 
 // 以下驱动还含 HC32L110 手写的实例单例与引脚复用表（PAC 元数据暂缺
@@ -103,32 +117,65 @@ mod peripheral;
 // 表），随家族 feature 门控；迁入元数据后按封装派生。
 #[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
 pub mod peripherals;
+#[cfg(all(feature = "hc32l130", feature = "_chip-selected"))]
+pub mod peripherals;
 mod time;
 pub use time::Hertz;
 
 #[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
 use peripherals::Peripherals;
+#[cfg(all(feature = "hc32l130", feature = "_chip-selected"))]
+use peripherals::Peripherals;
 
 /// 初始化配置。
 ///
 /// 仅开放 GPIO 等驱动、时钟模块未适配的型号没有 [`Config::clock`] 字段。
+/// HC32L13x 当前只接入默认时钟路径（复位 RCH 4 MHz + 出厂 TRIM 装载，
+/// 见 [`clock::init_default`]），没有可配置字段。
 #[derive(Default)]
-#[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
+#[cfg(all(sysctrl_ddl_v2_2, feature = "_chip-selected"))]
 pub struct Config {
     /// 时钟树配置。`None` = 保持复位默认（RCH 4 MHz，不分频）。
     pub clock: Option<clock::Config>,
 }
 
+/// HC32L13x 的初始化配置：仅默认时钟路径，无字段。
+///
+/// `Config::default()` 在 L110 上携带时钟树配置字段（`Option<clock
+/// ::Config>`，`None` = 复位默认）；L13x 的可配置时钟树尚未接入，应用
+/// 用空配置初始化即可，后续接入后在本类型上增加同名字段保持入口稳定。
+#[derive(Default)]
+#[cfg(all(sysctrl_ddl_v3_1, feature = "_chip-selected"))]
+pub struct Config {}
+
 /// 初始化 HAL，一次性发放全部外设单例。
 ///
-/// 配置了 [`Config::clock`] 时先执行时钟树初始化（RM 3.2.1 标准切换流
-/// 程），再发放外设。无论是否配置时钟，均按数据手册要求为 16 引脚封装
-/// 未引出的 P03/P32/P33/P34 使能上拉（方向寄存器复位值已为输入）。
+/// HC32L110：配置了 [`Config::clock`] 时先执行时钟树初始化（RM 3.2.1
+/// 标准切换流程），再发放外设。无论是否配置时钟，均按数据手册要求为
+/// 16 引脚封装未引出的 P03/P32/P33/P34 使能上拉（方向寄存器复位值已
+/// 为输入）。
 #[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
 pub fn init(config: Config) -> Peripherals {
     if let Some(clock) = &config.clock {
         clock::init(clock);
     }
+    init_pins();
+    Peripherals::take()
+}
+
+/// 初始化 HAL（HC32L13x 默认路径），一次性发放全部外设单例。
+///
+/// 依次执行（对齐厂商 `SystemInit`，Rust 启动路径不运行厂商代码）：
+///
+/// 1. 装载 RCH/RCL 出厂校准 TRIM（[`clock::init_default`]）；
+/// 2. 按当前料号封装处理未引出脚（数字输入 + 上拉，SDK `_HidePinInit`
+///    同源；DS 3.1 表下注与 RM 6.3）；
+/// 3. 发放外设单例。
+///
+/// 系统时钟保持复位默认：RCH 4 MHz，HCLK = PCLK = 4 MHz。
+#[cfg(all(feature = "hc32l130", feature = "_chip-selected"))]
+pub fn init(_config: Config) -> Peripherals {
+    clock::init_default();
     init_pins();
     Peripherals::take()
 }
@@ -147,4 +194,19 @@ fn init_pins() {
         clock::enable_gpio();
         gpio::backend_pull_up_unbonded();
     }
+}
+
+/// 封装相关的引脚默认处理（HC32L13x，SDK `_HidePinInit` 同源）。
+///
+/// 各封装均有未引出 IO（见 `peripherals` 模块文档的封装差异表），
+/// 按 `hc32l130-<引脚数>pin` 封装 feature 选择掩码；处理期间临时打开
+/// GPIO 门控、结束后恢复原值（SDK `_HidePinInit` 保存/恢复同做法）。
+#[cfg(all(feature = "hc32l130", feature = "_chip-selected"))]
+fn init_pins() {
+    // SDK `_HidePinInit`：保存 PERI_CLKEN → 置 GPIO 位 → 配未引出脚 →
+    // 整写恢复。GPIO 门控复位为关（RM 3.5.9 复位值 0x8080_0000）。
+    let saved = clock::sysctrl_v3_1::read_peri_clken();
+    clock::enable_gpio();
+    gpio::backend_pull_up_unbonded();
+    clock::sysctrl_v3_1::write_peri_clken(saved);
 }

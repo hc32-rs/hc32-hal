@@ -4,17 +4,22 @@
 //! 等）实现 [`Pin`]，[`Flex`] 可在输入/输出/开漏/模拟间任意切换，
 //! [`Input`]/[`Output`]/[`OutputOpenDrain`] 在构造时固定模式。
 //!
-//! 寄存器操作按 IP 后端拆分：当前为 DDL v2 精简端口布局（[`gpio_v2`]，
-//! HC32L110 等）。接入第二种布局时沿用本入口的公开类型与 embedded-hal
-//! trait 实现，仅把有差异的寄存器操作移入新的私有 IP 文件（AGENTS.md
-//! 「HAL 源码布局与命名」）。
+//! 寄存器操作按 IP 后端拆分：HC32L110 等精简端口布局为 DDL v2
+//! （[`gpio_v2`]），HC32L13x 端口阵列为 DDL v3_3（[`gpio_v3_3`]）。接入
+//! 新布局时沿用本入口的公开类型与 embedded-hal trait 实现，仅把有差异
+//! 的寄存器操作移入新的私有 IP 文件（AGENTS.md「HAL 源码布局与命名」）。
 //!
-//! HC32L110（v2 布局）没有输出速度档位，只有驱动能力档位（PxDR），因此
-//! 用 [`Drive`] 取代 Embassy STM32 HAL 的 `Speed`。
+//! 两种布局都没有输出速度档位，只有驱动能力档位（PxDR），因此用
+//! [`Drive`] 取代 Embassy STM32 HAL 的 `Speed`。
 //!
 //! [`gpio_v2`]: self::gpio_v2
+//! [`gpio_v3_3`]: self::gpio_v3_3
 
+#[cfg(gpio_ddl_v2)]
 mod gpio_v2;
+#[cfg(gpio_ddl_v2)]
+use gpio_v2 as backend;
+#[cfg(gpio_ddl_v2)]
 // 后端原语对 clock 模块可见（晶振引脚模拟模式与波形输出引脚都是 GPIO
 // 寄存器操作，经此入口转发，不重复实现）。
 pub(crate) use gpio_v2::{
@@ -26,14 +31,22 @@ pub(crate) use gpio_v2::{
 };
 // 16 引脚封装未引出脚上拉：仅由适用的 L110 小封装料号带出（DS 第 4 章
 // 表下注），[`crate::init`] 调用。
-#[cfg(feature = "hc32l110-16pin")]
+#[cfg(all(gpio_ddl_v2, feature = "hc32l110-16pin"))]
 pub(crate) use gpio_v2::pull_up_unbonded as backend_pull_up_unbonded;
+
+#[cfg(gpio_ddl_v3_3)]
+mod gpio_v3_3;
+#[cfg(gpio_ddl_v3_3)]
+use gpio_v3_3 as backend;
+// HC32L13x 各封装未引出脚处理（SDK `_HidePinInit` 同源），仅由带
+// hc32l130-*pin 封装 feature 的料号编译，[`crate::init`] 调用。
+#[cfg(all(gpio_ddl_v3_3, feature = "hc32l130"))]
+pub(crate) use gpio_v3_3::pull_up_unbonded as backend_pull_up_unbonded;
 
 use core::convert::Infallible;
 use core::marker::PhantomData;
 
 use crate::peripheral::Peri;
-use gpio_v2 as backend;
 
 /// 数字电平。
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

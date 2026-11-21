@@ -261,3 +261,33 @@
 | SDK 依据 | `driver/src/clk.c` `Clk_GetRClkFreq`：读 RCL_CR_f.TRIM 判 bit9，为 1 判 38.4k、为 0 判 32.768k；SDK 同样未给出文档依据 |
 | HAL 处理 | `hc32-ddl-hal/src/uart.rs` `Sclk::frequency` 按 SDK 同款判别（bit9 区分），文档标注"未验证推断"；影响 LPMODE=0（已被拒绝的 SCLK≠PCLK 组合不受影响）与 `low_power_baudrate()` 返回值 |
 | 验证状态 | 待验证（RCL 双档位实测波特率或示波器测 RCL_OUT 引脚频率后更新本条） |
+
+## HC32L13x · GPIO · SDK _HidePinInit 行内注释与掩码不符
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L130 四料号（E8PA/F8UA/J8TA/J8UA），GPIO `ddl_v3_3` |
+| 手册依据 | `DS_HC32L13x系列数据手册_Rev2.20` 表 3-2（64/48/32/28 四列引脚功能说明）与 3.1 封装图：各封装未引出 IO 一览（见 `hc32-ddl-hal/src/peripherals/peripherals_l130.rs` 模块文档的封装差异表） |
+| SDK 依据 | `xh_ddl_sdk/HC32L13x_DDL_Rev2.2.0/mcu/common/system_hc32l13x.c` `_HidePinInit`：48PIN 分支 `PCPU |= 0x1FFF` 注释"PC00~PC12"（0x1FFF 实为 PC00~PC12 共 13 位一致，注释少列一位无碍）；`PDPU |= 0x00F4` 注释"PD02/PD04/PD06"（0x00F4 实为 PD02/PD04/PD05 三位，注释漏 PD05 多列 PD06）；32PIN 分支 `PDPU |= 0x00F4` 注释"PD02/04/PD06"（同为 PD02/PD04/PD05）。掩码本身与 DS 表 3-2 一致，行内注释笔误 |
+| HAL 处理 | `hc32-ddl-hal/src/gpio/gpio_v3_3.rs` `pull_up_unbonded` 按 SDK **掩码**而非注释确定未引出脚集合（PD02/PD04/PD05 上拉，PD06 不动），注释如实标注出处与取舍 |
+| 验证状态 | 已确认（掩码与 DS 表 3-2 逐位核对一致；上拉后的实际漏电流与工作稳定性待板测） |
+
+## HC32L13x · SYSCTRL · RCH 为当前时钟源时直写 TRIM 的时序手册未说明
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L130 四料号，SYSCTRL `ddl_v3_1`，默认初始化的 TRIM 装载 |
+| 手册依据 | `RM_HC32L13x系列参考手册_Rev2.50` 3.1.1/3.2.2：更改 RCH 输出频率"需要按照特定的更改时序，详见系统时钟切换章节"，3.2.2 给出 RCH_EN=1 下逐级换频方案（4M→8M→16M→24M/22.12M，配 HCLK_PRS=7）；但**复位默认源即 RCH**（SYSCTRL0 复位值 0x0000_0001，RM 3.5.1），复位默认 RCH_CR=0x126（晶圆 TRIM）→ 装载出厂校准值（0x00100C08，4 MHz 档）属"同档校准替换"还是"换频"、是否必须走逐级序列，手册未说明 |
+| SDK 依据 | `xh_ddl_sdk/HC32L13x_DDL_Rev2.2.0/mcu/common/system_hc32l13x.c` `SystemInit` 在 RCH_EN=1、CLKSW=RCH 的复位态直接写 `RCH_CR_f.TRIM = *(0x00100C08)`，无 HCLK_PRS=7 步进、无 STABLE 等待 |
+| HAL 处理 | `hc32-ddl-hal/src/clock/sysctrl_v3_1.rs` `init_default` 沿用 SDK SystemInit 行为（直接写 TRIM 装载出厂校准值），注释标注手册未说明与依据；若后续实测装载失败或频率异常，改为"先关 RCH_EN→装载→重启→等 STABLE"序列 |
+| 验证状态 | 待验证（上板后以时钟输出引脚或 SysTick 校验装载后频率为 4 MHz 档） |
+
+## HC32L13x · SYSCTRL · SDK SystemInit 不等待 RCH STABLE
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32L130 四料号，SYSCTRL `ddl_v3_1`，默认初始化装载后是否等待稳定 |
+| 手册依据 | `RM_HC32L13x系列参考手册_Rev2.50` 3.1.1："内部高速时钟从启动到稳定仅需 4us"；3.5.4 RCH_CR.STABLE 为 RO 稳定标志。TRIM 直写后 STABLE 是否重新清零，手册未说明 |
+| SDK 依据 | `xh_ddl_sdk/HC32L13x_DDL_Rev2.2.0/mcu/common/system_hc32l13x.c` `SystemInit` 写 TRIM 后不查询 STABLE、不延时，直接进入后续初始化 |
+| HAL 处理 | `hc32-ddl-hal/src/clock/sysctrl_v3_1.rs` `init_default` 与 SDK 一致不等待（RCH 未关停、TRIM 同档替换，4 us 量级稳定远快于任何后续寄存器访问序列）；代码注释标注该取舍 |
+| 验证状态 | 待验证（与上一条同场景板测：装载后立即读时钟相关外设无异常即确认） |

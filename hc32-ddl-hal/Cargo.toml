@@ -34,6 +34,16 @@ hc32l110c4ua = ["dep:hc32-metapac", "hc32-metapac/hc32l110c4ua", "hc32l110", "hc
 hc32l110c6pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110c6pa", "hc32l110", "hc32l110-full-pins", "_chip-selected"]
 hc32l110c6ua = ["dep:hc32-metapac", "hc32-metapac/hc32l110c6ua", "hc32l110", "hc32l110-full-pins", "_chip-selected"]
 
+# HC32L130（HC32L13x 系列，GPIO gpio/ddl_v3_3 + SYSCTRL sysctrl/
+# ddl_v3_1，hc32-ddl-data docs/peripheral-versions.csv）。封装差异
+# （DS Rev2.20 表 3-2）：E8PA TSSOP28 带出 hc32l130-28pin，F8UA QFN32
+# 带出 hc32l130-32pin，J8TA LQFP48 与 J8UA QFN48 带出 hc32l130-48pin；
+# 各封装均有未引出 IO，由 init 按掩码配为数字输入并上拉。
+hc32l130e8pa = ["dep:hc32-metapac", "hc32-metapac/hc32l130e8pa", "hc32l130", "hc32l130-28pin", "_chip-selected"]
+hc32l130f8ua = ["dep:hc32-metapac", "hc32-metapac/hc32l130f8ua", "hc32l130", "hc32l130-32pin", "_chip-selected"]
+hc32l130j8ta = ["dep:hc32-metapac", "hc32-metapac/hc32l130j8ta", "hc32l130", "hc32l130-48pin", "_chip-selected"]
+hc32l130j8ua = ["dep:hc32-metapac", "hc32-metapac/hc32l130j8ua", "hc32l130", "hc32l130-48pin", "_chip-selected"]
+
 # 内部标记：任一公开料号 feature 都带出。dep: 语法不注册裸
 # hc32-metapac feature，src 与 build.rs 以此 cfg 判断“已选料号”。
 _chip-selected = []
@@ -47,3 +57,16 @@ hc32l110 = []
 hc32l110-16pin = []
 # 20 引脚封装（TSSOP20/QFN20）：全部引脚引出，P03/P32/P33/P34 可用。
 hc32l110-full-pins = []
+
+# 内部派生 feature：HC32L13x 手写引脚表与封装差异的适用范围，同上
+# 不要单独启用。引脚名沿用手册 PA00 等写法，单例按 (端口, 位号) 派生。
+hc32l130 = []
+# 28 引脚封装（E8PA TSSOP28）：PA00~PA14、PB00~PB02、PC14/PC15、
+# PD00/PD01/PD03 引出，其余 IO 不发放且 init 配上拉。
+hc32l130-28pin = []
+# 32 引脚封装（F8UA QFN32）：PA02、PA04~PA15、PB00/PB01/PB03~PB07/
+# PB11、PC14/PC15、PD00/PD01/PD03 引出。
+hc32l130-32pin = []
+# 48 引脚封装（J8TA LQFP48、J8UA QFN48）：PA00~PA15、PB00~PB15、
+# PC13/PC14/PC15、PD00/PD01/PD03/PD06/PD07 引出。
+hc32l130-48pin = []

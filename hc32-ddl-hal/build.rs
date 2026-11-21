@@ -27,8 +27,11 @@ use hc32_metapac::metadata::METADATA;
 /// HAL 已适配的驱动后端：`((kind, version), 组合依赖)`。
 ///
 /// 组合依赖是驱动除自身寄存器外还需要的后端 cfg。按当前驱动代码核实：
-/// - SYSCTRL（clock）：晶振引脚模拟模式经 GPIO 寄存器（RM 3.1），FLASH
-///   等待周期经 FLASH 寄存器（RM 3.2.1）；
+/// - SYSCTRL（clock）ddl_v2_2：晶振引脚模拟模式经 GPIO 寄存器（L110
+///   RM 3.1），FLASH 等待周期经 FLASH 寄存器（RM 3.2.1）；
+/// - SYSCTRL ddl_v3_1（HC32L13x）：当前只实现默认初始化（装载出厂
+///   TRIM）与 GPIO 门控，不触碰晶振引脚与 FLASH 寄存器，仅依赖 GPIO
+///   （未引出脚上拉）；可配置时钟树接入后再按 L13x RM 3.2 补依赖；
 /// - BT/ADT/LPTIM/PCA：输出门控选择直接写 GPIO CTRLx（RM 9/11/12/13），
 ///   时钟门控与频率经 SYSCTRL；
 /// - UART/LPUART：波特率定时器占用 BT（RM 15.1/16.1）、引脚复用经
@@ -39,6 +42,8 @@ use hc32_metapac::metadata::METADATA;
 const DRIVER_BACKENDS: &[((&str, &str), &[&str])] = &[
     (("gpio", "ddl_v2"), &["sysctrl_ddl_v2_2"]),
     (("sysctrl", "ddl_v2_2"), &["gpio_ddl_v2", "flash_ddl_v3"]),
+    (("gpio", "ddl_v3_3"), &["sysctrl_ddl_v3_1"]),
+    (("sysctrl", "ddl_v3_1"), &["gpio_ddl_v3_3"]),
     (("bt", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
     (("adt", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
     (("lptim", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
@@ -65,12 +70,13 @@ fn main() {
         let cfg = format!("{kind}_{version}");
         println!("cargo:rustc-check-cfg=cfg({cfg})");
     }
-    // 驱动源码引用的实例 cfg 固定为 L110 的实例名；后续型号接入时由元
-    // 数据声明扩展（见 select_drivers）。
+    // 驱动源码引用的实例 cfg 固定为 L110 的实例名；L130 的 SYSCTRL
+    // 实例名一并列出（select_drivers 覆盖元数据中的全部实例）。
     for instance in [
         "peri_gpio",
         "peri_clock",
         "peri_flash",
+        "peri_sysctrl",
         "peri_bt0",
         "peri_bt1",
         "peri_bt2",
@@ -90,13 +96,18 @@ fn main() {
     }
 
     // 与 metapac 构建脚本同源判断：HAL 料号 feature 以 CARGO_FEATURE_HC32
-    // 开头。内部家族/封装 feature（hc32l110、hc32l110-full-pins）在
-    // metapac 无同名芯片 feature，只选它们等于不选料号，需精确排除
-    // （不能按前缀排除：hc32l110b4pa 等真料号同样以 hc32l110 开头）。
+    // 开头。内部家族/封装 feature（hc32l110、hc32l110-full-pins、
+    // hc32l130-48pin 等）在 metapac 无同名芯片 feature，只选它们等于不选
+    // 料号，需精确排除（不能按前缀排除：hc32l110b4pa 等真料号同样以
+    // hc32l110/hc32l130 开头）。
     const INTERNAL_FEATURES: &[&str] = &[
         "CARGO_FEATURE_HC32L110",
         "CARGO_FEATURE_HC32L110_16PIN",
         "CARGO_FEATURE_HC32L110_FULL_PINS",
+        "CARGO_FEATURE_HC32L130",
+        "CARGO_FEATURE_HC32L130_28PIN",
+        "CARGO_FEATURE_HC32L130_32PIN",
+        "CARGO_FEATURE_HC32L130_48PIN",
     ];
     let mut chip_features = env::vars().map(|(name, _)| name).filter(|name| {
         name.starts_with("CARGO_FEATURE_HC32") && !INTERNAL_FEATURES.contains(&name.as_str())

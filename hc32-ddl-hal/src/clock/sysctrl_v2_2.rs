@@ -92,6 +92,9 @@ pub(crate) fn write_peri_clken(value: pac::sysctrl_ddl_v2_2::regs::PeriClken) {
     pac::CLOCK.peri_clken().write_value(value);
 }
 
+/// HC32L110 复位默认（RCH 4 MHz 档）的标称输出频率（RM 3.1.1）。
+pub(crate) const DEFAULT_RCH_HZ: u32 = 4_000_000;
+
 /// 读-改-写 SYSTICK_CR（RM 3.5.9）。
 pub(crate) fn modify_systick_cr(f: impl FnOnce(&mut pac::sysctrl_ddl_v2_2::regs::SystickCr)) {
     pac::CLOCK.systick_cr().modify(f);
