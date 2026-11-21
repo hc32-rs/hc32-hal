@@ -2,6 +2,9 @@
 //!
 //! 每个物理引脚一个零大小单例类型，由 [`crate::init`] 一次性发放；
 //! 引脚的存在性以端口/位字段为准，不由 PAC 元数据生成（上游暂缺引脚表）。
+//!
+//! 外设字段由 build.rs 从 PAC 元数据派生的实例 cfg（`peri_<实例>`）门控：
+//! 芯片拥有该实例才发放对应单例。
 
 // 引脚单例沿用手册引脚名（P14 等）。
 #![allow(non_snake_case)]
@@ -89,6 +92,10 @@ pin_singletons!(
 /// P00/RESETB 为复位输入，方向与上拉等控制位保留，暂不作为 GPIO 暴露。
 
 /// 外设集合：每字段是对应单例的独占引用。
+///
+/// 引脚单例属于 GPIO 驱动（后端 `gpio_ddl_v2`）；定时器、串口等字段
+/// 由实例 cfg `peri_<实例>`（build.rs 从 PAC 元数据派生）控制，后续
+/// 型号按其实例清单自动增减。
 pub struct Peripherals {
     /// 端口 P0 引脚（P00/RESETB 除外，见模块文档）。
     #[cfg(feature = "hc32l110-full-pins")]
@@ -115,26 +122,37 @@ pub struct Peripherals {
     pub P35: Peri<'static, P35>,
     pub P36: Peri<'static, P36>,
     /// 基本定时器 TIM0。
+    #[cfg(all(bt_ddl_v1, peri_bt0))]
     pub BT0: Peri<'static, crate::bt::Bt0>,
     /// 基本定时器 TIM1。
+    #[cfg(all(bt_ddl_v1, peri_bt1))]
     pub BT1: Peri<'static, crate::bt::Bt1>,
     /// 基本定时器 TIM2。
+    #[cfg(all(bt_ddl_v1, peri_bt2))]
     pub BT2: Peri<'static, crate::bt::Bt2>,
     /// 低功耗定时器。
+    #[cfg(all(lptim_ddl_v1, peri_lptimer))]
     pub LPTIM: Peri<'static, crate::lptim::LpTim>,
     /// 可编程计数阵列。
+    #[cfg(all(pca_ddl_v1, peri_pca))]
     pub PCA: Peri<'static, crate::pca::PcaPeri>,
     /// 高级定时器 TIM4。
+    #[cfg(all(adt_ddl_v1, peri_adt0))]
     pub ADT0: Peri<'static, crate::adt::Adt0>,
     /// 高级定时器 TIM5。
+    #[cfg(all(adt_ddl_v1, peri_adt1))]
     pub ADT1: Peri<'static, crate::adt::Adt1>,
     /// 高级定时器 TIM6。
+    #[cfg(all(adt_ddl_v1, peri_adt2))]
     pub ADT2: Peri<'static, crate::adt::Adt2>,
     /// UART0。
+    #[cfg(all(uart_ddl_v1, peri_uart0))]
     pub UART0: Peri<'static, crate::uart::Uart0>,
     /// UART1。
+    #[cfg(all(uart_ddl_v1, peri_uart1))]
     pub UART1: Peri<'static, crate::uart::Uart1>,
     /// 低功耗 UART。
+    #[cfg(all(lpuart_ddl_v1, peri_lpuart))]
     pub LPUART: Peri<'static, crate::uart::LpUartPeri>,
 }
 
@@ -182,16 +200,27 @@ impl Peripherals {
                 P34: P34::steal(),
                 P35: P35::steal(),
                 P36: P36::steal(),
+                #[cfg(all(bt_ddl_v1, peri_bt0))]
                 BT0: crate::bt::Bt0::steal(),
+                #[cfg(all(bt_ddl_v1, peri_bt1))]
                 BT1: crate::bt::Bt1::steal(),
+                #[cfg(all(bt_ddl_v1, peri_bt2))]
                 BT2: crate::bt::Bt2::steal(),
+                #[cfg(all(lptim_ddl_v1, peri_lptimer))]
                 LPTIM: crate::lptim::LpTim::steal(),
+                #[cfg(all(pca_ddl_v1, peri_pca))]
                 PCA: crate::pca::PcaPeri::steal(),
+                #[cfg(all(adt_ddl_v1, peri_adt0))]
                 ADT0: crate::adt::Adt0::steal(),
+                #[cfg(all(adt_ddl_v1, peri_adt1))]
                 ADT1: crate::adt::Adt1::steal(),
+                #[cfg(all(adt_ddl_v1, peri_adt2))]
                 ADT2: crate::adt::Adt2::steal(),
+                #[cfg(all(uart_ddl_v1, peri_uart0))]
                 UART0: crate::uart::Uart0::steal(),
+                #[cfg(all(uart_ddl_v1, peri_uart1))]
                 UART1: crate::uart::Uart1::steal(),
+                #[cfg(all(lpuart_ddl_v1, peri_lpuart))]
                 LPUART: crate::uart::LpUartPeri::steal(),
             }
         }

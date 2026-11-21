@@ -10,20 +10,34 @@ hc32-metapac = { version = "0.1.0", path = "../../hc32-metapac", optional = true
 embedded-hal = "1.0"
 embedded-hal-nb = "1.0"
 
+# 构建期读取当前料号的 PAC 元数据，与普通依赖声明同一 path 与同一
+# 转发 feature：cargo 的 resolver=3 保证两侧选中的是同一颗芯片。
+# 只开 metadata，构建依赖侧不编译 PAC 寄存器代码（pac 默认 feature）。
+[build-dependencies]
+hc32-metapac = { version = "0.1.0", path = "../../hc32-metapac", optional = true, default-features = false, features = ["metadata"] }
+
 [features]
 rt = ["hc32-metapac/rt"]
 memory-x = ["hc32-metapac/memory-x"]
 
 # 芯片选择 feature：转发到 PAC，一次只能启用一个。
-hc32l110b4pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110b4pa", "hc32l110"]
-hc32l110b6pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110b6pa", "hc32l110"]
-hc32l110b6ya = ["dep:hc32-metapac", "hc32-metapac/hc32l110b6ya", "hc32l110"]
-hc32l110c4pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110c4pa", "hc32l110", "hc32l110-full-pins"]
-hc32l110c4ua = ["dep:hc32-metapac", "hc32-metapac/hc32l110c4ua", "hc32l110", "hc32l110-full-pins"]
-hc32l110c6pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110c6pa", "hc32l110", "hc32l110-full-pins"]
-hc32l110c6ua = ["dep:hc32-metapac", "hc32-metapac/hc32l110c6ua", "hc32l110", "hc32l110-full-pins"]
+# `dep:hc32-metapac` 同时激活普通依赖（寄存器访问）与构建依赖
+# （元数据读取），`hc32-metapac/<料号>` 同时转发两侧。
+hc32l110b4pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110b4pa", "hc32l110", "_chip-selected"]
+hc32l110b6pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110b6pa", "hc32l110", "_chip-selected"]
+hc32l110b6ya = ["dep:hc32-metapac", "hc32-metapac/hc32l110b6ya", "hc32l110", "_chip-selected"]
+hc32l110c4pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110c4pa", "hc32l110", "hc32l110-full-pins", "_chip-selected"]
+hc32l110c4ua = ["dep:hc32-metapac", "hc32-metapac/hc32l110c4ua", "hc32l110", "hc32l110-full-pins", "_chip-selected"]
+hc32l110c6pa = ["dep:hc32-metapac", "hc32-metapac/hc32l110c6pa", "hc32l110", "hc32l110-full-pins", "_chip-selected"]
+hc32l110c6ua = ["dep:hc32-metapac", "hc32-metapac/hc32l110c6ua", "hc32l110", "hc32l110-full-pins", "_chip-selected"]
 
-# 内部派生 feature：HC32L110 系列公共代码。
+# 内部标记：任一公开料号 feature 都带出。dep: 语法不注册裸
+# hc32-metapac feature，src 与 build.rs 以此 cfg 判断“已选料号”。
+_chip-selected = []
+
+# 内部派生 feature：HC32L110 手写引脚表与封装差异的适用范围。
+# 引脚表迁入 PAC 元数据后由元数据派生（见 AGENTS.md「从具体型号
+# 选择驱动」）；在此之前不要单独启用，请选完整料号。
 hc32l110 = []
 # 20 引脚封装相对 16 引脚封装多引出 P03/P32/P33/P34。
 hc32l110-full-pins = []
