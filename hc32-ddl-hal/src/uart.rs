@@ -420,8 +420,8 @@ impl<'d, T: Instance> Uart<'d, T> {
             enable_peripheral(PeripheralGate::BaseTim, true);
         }
         // 引脚复用：TX 输出、RX 输入（RM 6.4.1 数字功能端口方向约定）。
-        gpio::set_pin_af(tx.pin_number(), tx.af(), false, config.tx_pull);
-        gpio::set_pin_af(rx.pin_number(), rx.af(), true, config.rx_pull);
+        gpio::set_pin_af(tx.pin_id(), tx.af(), false, config.tx_pull);
+        gpio::set_pin_af(rx.pin_id(), rx.af(), true, config.rx_pull);
         // 波特率定时器：16 位自动重载，CNT 与 ARR 都写装载值（RM 16.4.3 注）。
         if let Some(tm) = tm {
             let bt = T::baud_timer();
@@ -720,8 +720,8 @@ impl<'d> LpUart<'d> {
             // 普通模式波特率来自 TIM2 的 TOG 输出（RM 16.1/16.4.3）。
             enable_peripheral(PeripheralGate::BaseTim, true);
         }
-        gpio::set_pin_af(tx.pin_number(), tx.af(), false, config.base.tx_pull);
-        gpio::set_pin_af(rx.pin_number(), rx.af(), true, config.base.rx_pull);
+        gpio::set_pin_af(tx.pin_id(), tx.af(), false, config.base.tx_pull);
+        gpio::set_pin_af(rx.pin_id(), rx.af(), true, config.base.rx_pull);
         if let Some(tm) = tm {
             let bt = pac::BT2;
             bt.arr().write(|w| w.set_arr(tm));

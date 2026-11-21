@@ -135,21 +135,16 @@ pub fn init(config: Config) -> Peripherals {
 
 /// 封装相关的引脚默认处理（HC32L110 手写引脚表）。
 ///
-/// 引脚数据暂缺于 PAC 元数据，按家族 feature 门控；迁入元数据后改为
-/// 按封装派生（AGENTS.md「从具体型号选择驱动」）。
+/// 未引出脚的上拉只适用于 16 引脚封装（TSSOP16/CSP16，`hc32l110-16pin`
+/// 由 B 系列料号带出），按 DS 第 4 章表下注正向门控；20 引脚封装不做
+/// 任何额外引脚处理。GPIO 门控经由当前型号的系统控制器打开。
 #[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
 fn init_pins() {
-    // 16 引脚封装未引出的 IO 需设为输入并使能上拉（DS 第 4 章表下注）。
-    // 方向寄存器复位值为全输入，这里只补上拉。
-    #[cfg(not(feature = "hc32l110-full-pins"))]
+    #[cfg(feature = "hc32l110-16pin")]
     {
+        // 16 引脚封装相对 TSSOP20 未引出的 IO 需设为输入并使能上拉
+        // （DS 第 4 章表下注）。方向寄存器复位值为全输入，只补上拉。
         clock::enable_gpio();
-        // P03 / P32 / P33 / P34
-        pac::GPIO.p0pu().modify(|w| w.set_p03(true));
-        pac::GPIO.p3pu().modify(|w| {
-            w.set_p32(true);
-            w.set_p33(true);
-            w.set_p34(true);
-        });
+        gpio::backend_pull_up_unbonded();
     }
 }

@@ -402,7 +402,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 
 ### HC32L110 gpio
 
-🧪 已编写待测试。`hc32-ddl-hal`（feature `hc32l110b4pa`/`b6pa`/`b6ya`/`c4pa`/`c4ua`/`c6pa`/`c6ua`）实现了 DDL v2 精简端口布局的 GPIO：`Flex`/`Input`/`Output`/`OutputOpenDrain`，寄存器经 hc32-metapac typed 访问器操作（P0–P3 的 DIR/IN/OUT/ADS/DR/PU/PD/OD 与逐引脚 `Pxy_SEL`）。覆盖范围：
+🧪 已编写待测试。`hc32-ddl-hal`（feature `hc32l110b4pa`/`b6pa`/`b6ya`/`c4pa`/`c4ua`/`c6pa`/`c6ua`）实现了 DDL v2 精简端口布局的 GPIO：`Flex`/`Input`/`Output`/`OutputOpenDrain`，寄存器经 hc32-metapac typed 访问器操作（P0–P3 的 DIR/IN/OUT/ADS/DR/PU/PD/OD 与逐引脚 `Pxy_SEL`，入口 `gpio/mod.rs` + 寄存器后端 `gpio/gpio_v2.rs`）。覆盖范围：
 
 - 数字输入/推挽输出/开漏输出，上下拉与驱动能力（PxDR 高/低档）配置；
 - embedded-hal 1.0 数字 trait；
@@ -412,7 +412,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 
 ### HC32L110 sysctrl
 
-🧪 已编写待测试。`hc32-ddl-hal`（feature 同上）实现了 SYSCTRL `ddl_v2_2` 时钟驱动 `clock.rs`：RCH/XTH/RCL/XTL 四源配置与切换（RM 3.2.1 标准流程，含 SYSCTRL2 解锁、XTH 稳定后 10ms 软件延时、FLASH_CR.WAIT >24MHz 处理、RCH 换频逐级步进）、HCLK（1~128）/PCLK（1~8）分频、`clocks()` 频率快照、18 项外设门控、SysTick 参考时钟选择、HCLK/PCLK 波形输出（P24/P31，供 `clock_div` 例程观测）。本芯片无 PLL（DS/RM/SDK 三方一致）。覆盖范围：
+🧪 已编写待测试。`hc32-ddl-hal`（feature 同上）实现了 SYSCTRL `ddl_v2_2` 时钟驱动 `clock/`（入口 `clock/mod.rs` + 寄存器后端 `clock/sysctrl_v2_2.rs`）：RCH/XTH/RCL/XTL 四源配置与切换（RM 3.2.1 标准流程，含 SYSCTRL2 解锁、XTH 稳定后 10ms 软件延时、FLASH_CR.WAIT >24MHz 处理、RCH 换频逐级步进）、HCLK（1~128）/PCLK（1~8）分频、`clocks()` 频率快照、18 项外设门控、SysTick 参考时钟选择、HCLK/PCLK 波形输出（P24/P31，供 `clock_div` 例程观测）。本芯片无 PLL（DS/RM/SDK 三方一致）。覆盖范围：
 
 - `Config` 默认 = 复位态（RCH 4 MHz、不分频）；XTH 晶振按 DS 7.3.7 推荐驱动档、支持 P01 外部输入；XTL 32.768k 晶振/P14 外部输入；
 - RCH 4/8/16/22.12/24 MHz 出厂校准档位（flash 0x00100C00 区），运行中换频走 RM 3.2.7 方案 1 逐级步进；

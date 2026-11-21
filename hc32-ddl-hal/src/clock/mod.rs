@@ -1,7 +1,14 @@
-//! 系统时钟（HC32L110，SYSCTRL `ddl_v2_2`）。
+//! 系统时钟。
 //!
-//! HC32L110 的时钟控制模块在 `CLOCK` 外设（基址 0x4000_2000）内，提供 4 个
-//! 系统时钟源（`SYSCTRL0.CLK_SW4_SEL`，2 位，RM 3.5.1）：
+//! 模块入口保留应用可见的配置与查询 API：[`Config`] 与 [`init`]、门控
+//! [`enable_peripheral`]、频率快照 [`clocks`]、SysTick 时钟与 HCLK/PCLK
+//! 波形输出。寄存器操作按 IP 后端拆分：当前为 SYSCTRL `ddl_v2_2`
+//! （HC32L110 的 `CLOCK` 外设，[`sysctrl_v2_2`]）。接入第二种布局时沿
+//! 用本入口的公开类型，仅替换寄存器访问（AGENTS.md「HAL 源码布局与
+//! 命名」）。
+//!
+//! HC32L110 的时钟控制模块提供 4 个系统时钟源（`SYSCTRL0.CLK_SW4_SEL`，
+//! 2 位，RM 3.5.1）：
 //!
 //! - `RCH`：内部高速 RC，4/8/16/22.12/24 MHz 出厂校准档位（RCH_CR.TRIM）；
 //! - `XTH`：外部高速晶振 4~32 MHz，或 P01 引脚外部输入；
@@ -10,19 +17,19 @@
 //!
 //! 本芯片**没有 PLL**（DS/RM/DDL SDK 三方一致）。
 //!
-//! 改写 SYSCTRL0/SYSCTRL1 前必须先向 SYSCTRL2 依次写入 0x5A5A、0xA5A5
-//! 解锁；一次写入完成后保护自动恢复（RM 3.5.3）。其余寄存器（RCH_CR 等
-//! 振荡控制、PERI_CLKEN、SYSTICK_CR）不在保护范围内，直接读-改-写。
-//!
 //! 初始化入口 [`init`] 按 RM 3.2.1 标准时钟切换流程执行：配置引脚与振荡
 //! 参数、使能源并等待稳定、按新旧时钟源中较高频率设置 FLASH 等待周期
 //! （FLASH_BYPASS 解锁后写 FLASH_CR.WAIT）、切换 `CLK_SW4_SEL`、按新源
 //! 频率复配等待周期、设置分频、关闭不再使用的源。
+//!
+//! [`sysctrl_v2_2`]: self::sysctrl_v2_2
+
+mod sysctrl_v2_2;
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::pac;
 use crate::time::Hertz;
+use sysctrl_v2_2 as backend;
 
 // ---------------------------------------------------------------------------
 // 时钟源与档位枚举
@@ -604,8 +611,10 @@ pub enum PeripheralGate {
 
 /// 开启 GPIO 外设时钟门控，幂等。
 ///
-/// 读取-修改-写回非原子：若中断处理器也会开关 GPIO 门控，需调用方自行
-/// 用临界区保护。驱动构造路径只在启动阶段执行，通常无需额外保护。
+/// GPIO 初始化路径（[`crate::init`] 与各 GPIO/复用构造入口）统一经由
+/// 当前型号的系统控制器打开门控。读取-修改-写回非原子：若中断处理器
+/// 也会开关 GPIO 门控，需调用方自行用临界区保护。驱动构造路径只在启动
+/// 阶段执行，通常无需额外保护。
 pub(crate) fn enable_gpio() {
     enable_peripheral(PeripheralGate::Gpio, true);
 }
@@ -614,7 +623,7 @@ pub(crate) fn enable_gpio() {
 ///
 /// 读取-修改-写回非原子；中断处理器同时操作门控时需调用方加临界区。
 pub fn enable_peripheral(gate: PeripheralGate, enable: bool) {
-    pac::CLOCK.peri_clken().modify(|w| match gate {
+    backend::modify_peri_clken(|w| match gate {
         PeripheralGate::Uart0 => w.set_uart0(enable),
         PeripheralGate::Uart1 => w.set_uart1(enable),
         PeripheralGate::Lpuart => w.set_lpuart(enable),
@@ -638,7 +647,7 @@ pub fn enable_peripheral(gate: PeripheralGate, enable: bool) {
 
 /// 查询外设时钟门控状态。
 pub fn is_peripheral_enabled(gate: PeripheralGate) -> bool {
-    let r = pac::CLOCK.peri_clken().read();
+    let r = backend::read_peri_clken();
     match gate {
         PeripheralGate::Uart0 => r.uart0(),
         PeripheralGate::Uart1 => r.uart1(),
@@ -753,67 +762,12 @@ impl Default for Config {
 }
 
 // ---------------------------------------------------------------------------
-// 内部工具：解锁、FLASH 等待周期、晶振引脚
+// 内部工具：晶振引脚、换频步进
 // ---------------------------------------------------------------------------
-
-/// 向 SYSCTRL2 依次写入解锁序列（RM 3.5.3）。
-///
-/// 每次改写 SYSCTRL0/SYSCTRL1 前调用；一次写入后保护自动恢复。
-fn unlock() {
-    pac::CLOCK.sysctrl2().write(|w| w.set_sysctrl2(0x5A5A));
-    pac::CLOCK.sysctrl2().write(|w| w.set_sysctrl2(0xA5A5));
-}
-
-/// 解锁后读-改-写 SYSCTRL0（写完保护自动恢复，RM 3.5.3）。
-fn write_sysctrl0(f: impl FnOnce(&mut pac::sysctrl_ddl_v2_2::regs::Sysctrl0)) {
-    unlock();
-    pac::CLOCK.sysctrl0().modify(f);
-}
-
-/// 解锁后读-改-写 SYSCTRL1（写完保护自动恢复，RM 3.5.3）。
-fn write_sysctrl1(f: impl FnOnce(&mut pac::sysctrl_ddl_v2_2::regs::Sysctrl1)) {
-    unlock();
-    pac::CLOCK.sysctrl1().modify(f);
-}
-
-/// 设置 FLASH 等待周期（FLASH_CR.WAIT，RM 7.5）。
-///
-/// HCLK 0~24MHz 时 0 个等待周期、24~48MHz 时 1 个（DS 7.3.5）；改写前
-/// 需向 FLASH_BYPASS 依次写 0x5A5A、0xA5A5 解锁（RM 7.7"寄存器写保护"：
-/// 两写之间不可插入其他写操作、不可被中断打断；每次 Bypass 序列后只能
-/// 修改一个寄存器）。写后按 RM 7.7 Step4 回读校验，不一致重试。
-fn set_flash_wait(enable: bool) {
-    // 先比对当前值，相同则无需触碰（RM 7.7 Step1）。
-    if pac::FLASH.cr().read().wait() == enable {
-        return;
-    }
-    // RM 7.7：Bypass 两写与目标写须关中断执行，结束后恢复原 PRIMASK。
-    let was_masked: u32;
-    unsafe {
-        core::arch::asm!("mrs {0}, primask", out(reg) was_masked, options(nomem));
-        core::arch::asm!("cpsid i", options(nomem, nostack));
-    }
-    for _ in 0..4 {
-        pac::FLASH.bypass().write(|w| w.set_byseq(0x5A5A));
-        pac::FLASH.bypass().write(|w| w.set_byseq(0xA5A5));
-        pac::FLASH.cr().modify(|w| w.set_wait(enable));
-        // RM 7.7 Step4：回读校验，不一致则重发序列。
-        if pac::FLASH.cr().read().wait() == enable {
-            break;
-        }
-    }
-    if was_masked == 0 {
-        unsafe { core::arch::asm!("cpsie i", options(nomem, nostack)) };
-    }
-    assert!(
-        pac::FLASH.cr().read().wait() == enable,
-        "clock: FLASH_CR.WAIT 写入校验失败"
-    );
-}
 
 /// 读当前系统时钟源。
 fn current_source() -> Sysclk {
-    Sysclk::decode(pac::CLOCK.sysctrl0().read().clk_sw4_sel()).unwrap_or(Sysclk::Rch)
+    Sysclk::decode(backend::read_sysctrl0().clk_sw4_sel()).unwrap_or(Sysclk::Rch)
 }
 
 /// 当前 HCLK 频率，用于软件延时估算。
@@ -822,12 +776,12 @@ fn current_source() -> Sysclk {
 fn current_hclk_hz() -> u32 {
     let sys = match current_source() {
         Sysclk::Rch => {
-            RchFreq::from_trim(pac::CLOCK.rch_cr().read().trim())
+            RchFreq::from_trim(backend::read_rch_cr().trim())
                 .frequency()
                 .0
         }
         Sysclk::Rcl => {
-            let trim = pac::CLOCK.rcl_cr().read().trim();
+            let trim = backend::read_rcl_cr().trim();
             if trim & (1 << 9) != 0 {
                 RclFreq::K38_4.frequency().0
             } else {
@@ -837,7 +791,7 @@ fn current_hclk_hz() -> u32 {
         Sysclk::Xth => 32_000_000,
         Sysclk::Xtl => 32_768,
     };
-    let prs = pac::CLOCK.sysctrl0().read().hclk_prs();
+    let prs = backend::read_sysctrl0().hclk_prs();
     sys >> prs
 }
 
@@ -857,59 +811,19 @@ fn delay_10ms() {
 /// 临时开启 GPIO 门控执行晶振引脚配置，结束后恢复原门控值（SDK
 /// `Clk_Enable` 同做法：保存 PERI_CLKEN → 置 GPIO 位 → 配引脚 → 恢复）。
 fn with_gpio_gate(f: impl FnOnce()) {
-    let saved = pac::CLOCK.peri_clken().read();
+    let saved = backend::read_peri_clken();
     if !saved.gpio() {
         enable_gpio();
         f();
-        pac::CLOCK.peri_clken().write_value(saved);
+        backend::write_peri_clken(saved);
     } else {
         f();
-    }
-}
-
-/// XTH 引脚配置（RM 3.1/3.2.3 Step1）。
-///
-/// 晶振模式：P01/P02 置模拟（P0ADS=1）。外部输入模式：P01 配为 GPIO
-/// 输入、P02 置模拟（RM 3.1 注意：外部输入时 P02 禁止作 GPIO）。
-fn setup_xth_pins(bypass: bool) {
-    if bypass {
-        pac::GPIO.p0ads().modify(|w| {
-            w.set_p01(false);
-            w.set_p02(true);
-        });
-        pac::GPIO.p0dir().modify(|w| w.set_p01(true));
-    } else {
-        pac::GPIO.p0ads().modify(|w| {
-            w.set_p01(true);
-            w.set_p02(true);
-        });
-    }
-}
-
-/// XTL 引脚配置（RM 3.1/3.2.2 Step1）。
-///
-/// 晶振模式：P14/P15 置模拟（P1ADS=1）。外部输入模式：P14 配为 GPIO
-/// 输入、P15 置模拟。
-fn setup_xtl_pins(bypass: bool) {
-    if bypass {
-        pac::GPIO.p1ads().modify(|w| {
-            w.set_p14(false);
-            w.set_p15(true);
-        });
-        pac::GPIO.p1dir().modify(|w| w.set_p14(true));
-    } else {
-        pac::GPIO.p1ads().modify(|w| {
-            w.set_p14(true);
-            w.set_p15(true);
-        });
     }
 }
 
 /// 直接写 RCH 出厂校准值（RCH_CR 不在解锁范围，RM 3.5.4）。
 fn write_rch_trim(freq: RchFreq) {
-    pac::CLOCK
-        .rch_cr()
-        .modify(|w| w.set_trim(freq.trim_value()));
+    backend::modify_rch_cr(|w| w.set_trim(freq.trim_value()));
 }
 
 /// RM 3.2.7 方案 1：RCH 为当前系统时钟时逐级换频。
@@ -917,8 +831,8 @@ fn write_rch_trim(freq: RchFreq) {
 /// 先把 HCLK 分频提到 /128，按 4M ↔ 8M ↔ 16M ↔ 24M/22.12M 逐级写 TRIM，
 /// 分频在 [`init`] 末尾统一写回配置值。
 fn rch_step_to(target: RchFreq) {
-    write_sysctrl0(|w| w.set_hclk_prs(HclkPrescaler::Div128 as u8));
-    let mut level = RchFreq::from_trim(pac::CLOCK.rch_cr().read().trim()).step_level();
+    backend::write_sysctrl0(|w| w.set_hclk_prs(HclkPrescaler::Div128 as u8));
+    let mut level = RchFreq::from_trim(backend::read_rch_cr().trim()).step_level();
     let target_level = target.step_level();
     while level != target_level {
         level = if target_level > level {
@@ -957,7 +871,7 @@ pub fn init(config: &Config) {
 
     // ---- RCH 频率（RM 3.2.6/3.2.7）----
     if let Some(target) = config.rch {
-        let current = RchFreq::from_trim(pac::CLOCK.rch_cr().read().trim());
+        let current = RchFreq::from_trim(backend::read_rch_cr().trim());
         if current != target {
             if old == Sysclk::Rch {
                 // RCH 正在驱动系统时钟：按 RM 3.2.7 方案 1 逐级换频。
@@ -971,17 +885,17 @@ pub fn init(config: &Config) {
 
     // ---- XTH（RM 3.2.3）----
     if let Some(xth) = config.xth {
-        with_gpio_gate(|| setup_xth_pins(xth.bypass));
+        with_gpio_gate(|| crate::gpio::backend_setup_xth_pins(xth.bypass));
         // XTH_CR 不在解锁范围（RM 3.2.3 Step2 先于 Step4 解锁）。
-        pac::CLOCK.xth_cr().modify(|w| {
+        backend::modify_xth_cr(|w| {
             w.set_driver((xth.freq_range.encode() << 2) | xth.driver.encode());
             w.set_startup(xth.startup.encode());
         });
         if xth.bypass {
-            write_sysctrl1(|w| w.set_exth_en(true));
+            backend::write_sysctrl1(|w| w.set_exth_en(true));
         }
         // 使能并等稳定（Step4~Step7）。
-        write_sysctrl0(|w| w.set_xth_en(true));
+        backend::write_sysctrl0(|w| w.set_xth_en(true));
         let deadline = wait_stable(WaitSource::Xth);
         if !deadline {
             panic!("clock: XTH 等待稳定超时");
@@ -992,11 +906,11 @@ pub fn init(config: &Config) {
 
     // ---- RCL（RM 3.2.5 Step1~Step4）----
     if let Some(rcl) = config.rcl {
-        pac::CLOCK.rcl_cr().modify(|w| {
+        backend::modify_rcl_cr(|w| {
             w.set_trim(rcl.trim_value());
             w.set_startup(RclStartup::Cycles256.encode());
         });
-        write_sysctrl0(|w| w.set_rcl_en(true));
+        backend::write_sysctrl0(|w| w.set_rcl_en(true));
         if !wait_stable(WaitSource::Rcl) {
             panic!("clock: RCL 等待稳定超时");
         }
@@ -1004,15 +918,15 @@ pub fn init(config: &Config) {
 
     // ---- XTL（RM 3.2.2）----
     if let Some(xtl) = config.xtl {
-        with_gpio_gate(|| setup_xtl_pins(xtl.bypass));
-        pac::CLOCK.xtl_cr().modify(|w| {
+        with_gpio_gate(|| crate::gpio::backend_setup_xtl_pins(xtl.bypass));
+        backend::modify_xtl_cr(|w| {
             w.set_driver((xtl.amplitude.encode() << 2) | xtl.driver.encode());
             w.set_startup(xtl.startup.encode());
         });
         if xtl.bypass {
-            write_sysctrl1(|w| w.set_extl_en(true));
+            backend::write_sysctrl1(|w| w.set_extl_en(true));
         }
-        write_sysctrl0(|w| w.set_xtl_en(true));
+        backend::write_sysctrl0(|w| w.set_xtl_en(true));
         if !wait_stable(WaitSource::Xtl) {
             panic!("clock: XTL 等待稳定超时");
         }
@@ -1027,7 +941,7 @@ pub fn init(config: &Config) {
     let sys_freq = match config.sys {
         Sysclk::Rch => match config.rch {
             Some(f) => f.frequency(),
-            None => RchFreq::from_trim(pac::CLOCK.rch_cr().read().trim()).frequency(),
+            None => RchFreq::from_trim(backend::read_rch_cr().trim()).frequency(),
         },
         Sysclk::Xth => {
             config
@@ -1050,10 +964,10 @@ pub fn init(config: &Config) {
     // 未说明，重启使等待必然有效；RCH 未驱动系统时钟，清置窗口无手册禁
     // 忌，启动仅 4us（RM 3.1.1）代价可忽略。
     if config.sys == Sysclk::Rch && old != Sysclk::Rch {
-        write_sysctrl0(|w| w.set_rch_en(false));
-        write_sysctrl0(|w| w.set_rch_en(true));
+        backend::write_sysctrl0(|w| w.set_rch_en(false));
+        backend::write_sysctrl0(|w| w.set_rch_en(true));
         // RM 3.2.6 Step4："查询等待 RCH_CR.Stable 标志变为 1"。
-        while !pac::CLOCK.rch_cr().read().stable() {}
+        while !backend::read_rch_cr().stable() {}
     }
 
     // ---- FLASH 等待周期，前置（RM 3.2.1 Step4，按新旧源较高频率）----
@@ -1063,35 +977,35 @@ pub fn init(config: &Config) {
         Sysclk::Rch | Sysclk::Rcl | Sysclk::Xtl => false,
     };
     if old_may_exceed_24m || sys_freq.0 > 24_000_000 {
-        set_flash_wait(true);
+        backend::set_flash_wait(true);
     }
 
     // ---- 切换系统时钟源（RM 3.2.1 Step6）----
     if config.sys != old {
-        write_sysctrl0(|w| w.set_clk_sw4_sel(config.sys.encode()));
+        backend::write_sysctrl0(|w| w.set_clk_sw4_sel(config.sys.encode()));
     }
 
     // ---- 分频（RM 3.5.1；RM 3.2.7 方案 1 的分频在此一并写回）----
-    write_sysctrl0(|w| {
+    backend::write_sysctrl0(|w| {
         w.set_hclk_prs(config.hclk_pre as u8);
         w.set_pclk_prs(config.pclk_pre as u8);
     });
 
     // ---- FLASH 等待周期，按新源频率复配（RM 3.2.1 Step7）----
-    set_flash_wait(sys_freq.0 > 24_000_000);
+    backend::set_flash_wait(sys_freq.0 > 24_000_000);
 
     // ---- 时钟故障检测（SYSCTRL1 位 4，SDK 定义 CLOCK_FT_EN）----
     // RM 3.5.2 位 4 标记 Reserved（差异台账已登记）；仅在用户显式开启
     // 时写 1，默认不触碰保留位。
     if config.clock_fault_detect {
-        write_sysctrl1(|w| w.set_clock_ft_en(true));
+        backend::write_sysctrl1(|w| w.set_clock_ft_en(true));
     }
 
     // ---- 关闭不再使用的旧源（RM 3.2.1 Step8）----
     // 仅处理本函数知情的能力：复位后仅 RCH 使能；XTH/RCL/XTL 若为旧源
     // 且未在配置中出现，说明是本函数之外的使能，不代为关闭。
     if old == Sysclk::Rch && config.rch.is_none() && config.sys != Sysclk::Rch {
-        write_sysctrl0(|w| w.set_rch_en(false));
+        backend::write_sysctrl0(|w| w.set_rch_en(false));
     }
 
     // ---- 频率快照 ----
@@ -1113,9 +1027,9 @@ fn wait_stable(source: WaitSource) -> bool {
     let deadline = 20_000_000u32;
     for _ in 0..deadline {
         let stable = match source {
-            WaitSource::Xth => pac::CLOCK.xth_cr().read().stable(),
-            WaitSource::Rcl => pac::CLOCK.rcl_cr().read().stable(),
-            WaitSource::Xtl => pac::CLOCK.xtl_cr().read().stable(),
+            WaitSource::Xth => backend::read_xth_cr().stable(),
+            WaitSource::Rcl => backend::read_rcl_cr().stable(),
+            WaitSource::Xtl => backend::read_xtl_cr().stable(),
         };
         if stable {
             return true;
@@ -1136,36 +1050,36 @@ enum WaitSource {
 
 /// 深度休眠唤醒后是否强制使用 RCH（SYSCTRL0.WAKEUP_BYRCH，RM 3.5.1 位 15）。
 pub fn set_wakeup_by_rch(enable: bool) {
-    write_sysctrl0(|w| w.set_wakeup_byrch(enable));
+    backend::write_sysctrl0(|w| w.set_wakeup_byrch(enable));
 }
 
 /// XTL 高级使能（SYSCTRL1.XTL_ALWAYS_ON，RM 3.5.2 位 3）。
 ///
 /// 置 1 后 SYSCTRL0.XTL_EN 只可置位不可清零。
 pub fn set_xtl_always_on(enable: bool) {
-    write_sysctrl1(|w| w.set_xtl_alwayson(enable));
+    backend::write_sysctrl1(|w| w.set_xtl_alwayson(enable));
 }
 
 /// RTC 低功耗模式（SYSCTRL1.RTC_LPW，RM 3.5.2 位 5）。
 ///
 /// 使能后 RTC 寄存器不可读写。
 pub fn set_rtc_lpw(enable: bool) {
-    write_sysctrl1(|w| w.set_rtc_lpw(enable));
+    backend::write_sysctrl1(|w| w.set_rtc_lpw(enable));
 }
 
 /// RESET 引脚改作 GPIO（SYSCTRL1.RES_UIO，RM 3.5.2 位 7）。
 pub fn set_res_pin_gpio(enable: bool) {
-    write_sysctrl1(|w| w.set_res_uio(enable));
+    backend::write_sysctrl1(|w| w.set_res_uio(enable));
 }
 
 /// SWD 引脚改作 GPIO（SYSCTRL1.SWD_UIO，RM 3.5.2 位 8）。
 pub fn set_swd_pin_gpio(enable: bool) {
-    write_sysctrl1(|w| w.set_swd_uio(enable));
+    backend::write_sysctrl1(|w| w.set_swd_uio(enable));
 }
 
 /// RTC 高速补偿时钟选择（SYSCTRL1.RTC_FREQ_ADJUST，RM 3.5.2 位 11:9）。
 pub fn set_rtc_adjust_clock(freq: RtcAdjustFreq) {
-    write_sysctrl1(|w| w.set_rtc_freq_adjust(freq.encode()));
+    backend::write_sysctrl1(|w| w.set_rtc_freq_adjust(freq.encode()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1179,7 +1093,7 @@ pub fn set_rtc_adjust_clock(freq: RtcAdjustFreq) {
 /// （RM 3.5.9 NOREF 字段注）。
 pub fn set_systick_clock(sel: SysTickClock) {
     enable_peripheral(PeripheralGate::Tick, true);
-    pac::CLOCK.systick_cr().modify(|w| {
+    backend::modify_systick_cr(|w| {
         w.set_noref(false);
         w.set_clk_sel(sel.encode());
     });
@@ -1188,12 +1102,12 @@ pub fn set_systick_clock(sel: SysTickClock) {
 /// SysTick 改用 HCLK（SYSTICK_CR.NOREF = 1，RM 3.5.9 位 25）。
 pub fn set_systick_hclk() {
     enable_peripheral(PeripheralGate::Tick, true);
-    pac::CLOCK.systick_cr().modify(|w| w.set_noref(true));
+    backend::modify_systick_cr(|w| w.set_noref(true));
 }
 
 /// 读取 STCALIB：参考时钟为 XTL 时的 10 ms 校准值（RM 3.5.9 位 23:0）。
 pub fn systick_calib() -> u32 {
-    pac::CLOCK.systick_cr().read().stcalib()
+    backend::read_systick_cr().stcalib()
 }
 
 // ---------------------------------------------------------------------------
@@ -1226,21 +1140,15 @@ impl OutputDiv {
 
 /// P24 输出 HCLK 波形（P24_SEL=3，GPIO CTRL1.HCLK_EN，RM 6.5.5/SDK
 /// `Gpio_SetFunc_HCLKOUT_P24`）。
+///
+/// 引脚与 CTRL1 的寄存器操作经 GPIO 后端执行，门控由后端打开。
 pub fn enable_hclk_output_p24(div: OutputDiv) {
-    enable_gpio();
-    pac::GPIO.p2ads().modify(|w| w.set_p24(false));
-    pac::GPIO.p24_sel().modify(|w| w.set_sel(3));
-    // PxDIR：true = 输入，false = 输出。
-    pac::GPIO.p2dir().modify(|w| w.set_p24(false));
-    pac::GPIO.ctrl1().modify(|w| {
-        w.set_hclk_sel(div.encode());
-        w.set_hclk_en(true);
-    });
+    crate::gpio::backend_enable_hclk_p24(div.encode());
 }
 
 /// 停止 P24 的 HCLK 输出（CTRL1.HCLK_EN = 0）。
 pub fn disable_hclk_output_p24() {
-    pac::GPIO.ctrl1().modify(|w| w.set_hclk_en(false));
+    crate::gpio::backend_disable_hclk_p24();
 }
 
 /// P31 输出 PCLK 波形（P31_SEL=3，GPIO CTRL1.PCLK_EN，RM 6.5.5/SDK
@@ -1252,17 +1160,10 @@ pub fn disable_hclk_output_p24() {
 pub fn enable_pclk_output_p31(div: OutputDiv) {
     enable_gpio();
     set_swd_pin_gpio(true);
-    pac::GPIO.p3ads().modify(|w| w.set_p31(false));
-    pac::GPIO.p31_sel().modify(|w| w.set_sel(3));
-    pac::GPIO.p3dir().modify(|w| w.set_p31(false));
-    pac::GPIO.ctrl1().modify(|w| {
-        w.set_pclk_sel(div.encode());
-        w.set_pclk_en(true);
-        w.set_hclk_en(false);
-    });
+    crate::gpio::backend_enable_pclk_p31(div.encode());
 }
 
 /// 停止 P31 的 PCLK 输出（CTRL1.PCLK_EN = 0）。
 pub fn disable_pclk_output_p31() {
-    pac::GPIO.ctrl1().modify(|w| w.set_pclk_en(false));
+    crate::gpio::backend_disable_pclk_p31();
 }

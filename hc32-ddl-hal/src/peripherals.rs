@@ -1,29 +1,68 @@
 //! HC32L110 引脚单例与外设集合。
 //!
-//! 每个物理引脚一个零大小单例类型，由 [`crate::init`] 一次性发放；
-//! 引脚的存在性以端口/位字段为准，不由 PAC 元数据生成（上游暂缺引脚表）。
+//! 每个物理引脚一个零大小单例类型，由 [`crate::init`] 一次性发放。
+//! 引脚声明集中为一份（[`l110_pins!`] 宏的 `pins` 段），单例类型、
+//! `Peripherals` 字段、构造与端口位号都由它派生，未引出脚以封装 cfg
+//! 门控；引脚的存在性以封装引脚表为准（DS 第 4 章，PAC 元数据暂缺引脚
+//! 表）。端口位号以 `(port, bit)` 二元组表达，无歧义区分 PA15 与 PB07
+//! 一类跨端口引脚（AGENTS.md「从具体型号选择驱动」）。
 //!
 //! 外设字段由 build.rs 从 PAC 元数据派生的实例 cfg（`peri_<实例>`）门控：
 //! 芯片拥有该实例才发放对应单例。
+//!
+//! 逐个核对过的封装引脚差异（DS 2.2/第 4 章引脚表）：
+//!
+//! | 料号 | 封装 | 引脚数 | 未引出 |
+//! | --- | --- | --- | --- |
+//! | HC32L110B4PA/B6PA | TSSOP16 | 16 | P03/P32/P33/P34 |
+//! | HC32L110B6YA | CSP16 | 16 | P03/P32/P33/P34 |
+//! | HC32L110C4PA/C4UA/C6PA/C6UA | TSSOP20/QFN20 | 20 | — |
 
 // 引脚单例沿用手册引脚名（P14 等）。
 #![allow(non_snake_case)]
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::peripheral::PeripheralType;
+use crate::peripheral::{Peri, PeripheralType};
 
-/// 生成引脚单例类型及其 `steal`。
-macro_rules! pin_singletons {
-    ($( $(#[$cfg:meta])* $name:ident ),* $(,)?) => {
+/// 生成 HC32L110 的引脚单例与外设集合。
+///
+/// 单一声明源（`pins` 段）派生四类产物：
+///
+/// - 引脚单例类型与 `steal`（按封装 cfg 门控）；
+/// - `SealedPin::pin_id`（`(port, bit)` 声明直接写入，无编号换算）；
+/// - `Peripherals` 的引脚字段；
+/// - `Peripherals::steal` 的引脚构造。
+///
+/// `instances` 段的每个条目声明一个外设字段：类型、门控 cfg 与构造
+/// 表达式，与引脚共用同一 `Peripherals` 定义。
+macro_rules! l110_peripherals {
+    (
+        pins {
+            $(
+                $(#[doc = $pin_doc:expr])*
+                $(#[cfg($($pin_cfg:tt)*)])?
+                $pin:ident = ($port:literal, $bit:literal)
+            ),* $(,)?
+        }
+        instances {
+            $(
+                $(#[doc = $inst_doc:expr])*
+                $(#[cfg($($inst_cfg:tt)*)])?
+                $inst:ident : $inst_ty:ty => $inst_steal:expr
+            ),* $(,)?
+        }
+    ) => {
         $(
-            $(#[$cfg])*
+            $(#[doc = $pin_doc])*
+            $(#[cfg($($pin_cfg)*)])?
             #[allow(non_camel_case_types)]
             #[derive(Copy, Clone)]
-            pub struct $name { _private: () }
+            pub struct $pin { _private: () }
 
-            $(#[$cfg])*
-            impl $name {
+            $(#[doc = $pin_doc])*
+            $(#[cfg($($pin_cfg)*)])?
+            impl $pin {
                 /// 直接取得该引脚，绕过 [`crate::init`] 的独占检查。
                 ///
                 /// # Safety
@@ -34,127 +73,133 @@ macro_rules! pin_singletons {
                 }
             }
 
-            $(#[$cfg])*
-            impl PeripheralType for $name {}
+            $(#[cfg($($pin_cfg)*)])?
+            impl PeripheralType for $pin {}
 
-            $(#[$cfg])*
-            impl crate::gpio::SealedPin for $name {
-                fn pin_number(&self) -> crate::gpio::PinNumber {
-                    crate::gpio::PinNumber::new(pin_singletons!(@num $name))
+            $(#[cfg($($pin_cfg)*)])?
+            impl crate::gpio::SealedPin for $pin {
+                fn pin_id(&self) -> crate::gpio::PinId {
+                    crate::gpio::PinId::new($port, $bit)
                 }
             }
 
-            $(#[$cfg])*
-            impl crate::gpio::Pin for $name {}
+            $(#[cfg($($pin_cfg)*)])?
+            impl crate::gpio::Pin for $pin {}
         )*
+
+        /// 外设集合：每字段是对应单例的独占引用。
+        ///
+        /// 引脚单例属于 GPIO 驱动（后端 `gpio_ddl_v2`）；定时器、串口等
+        /// 字段由实例 cfg `peri_<实例>`（build.rs 从 PAC 元数据派生）控制，
+        /// 后续型号按其实例清单自动增减。
+        pub struct Peripherals {
+            $(
+                $(#[doc = $pin_doc])*
+                $(#[cfg($($pin_cfg)*)])?
+                pub $pin: Peri<'static, $pin>,
+            )*
+            $(
+                $(#[doc = $inst_doc])*
+                $(#[cfg($($inst_cfg)*)])?
+                pub $inst: $inst_ty,
+            )*
+        }
+
+        impl Peripherals {
+            /// 不经独占检查构造外设集合。
+            ///
+            /// # Safety
+            ///
+            /// 调用方须保证所有单例不被两处同时持有。
+            pub unsafe fn steal() -> Self {
+                unsafe {
+                    Self {
+                        $( $(#[cfg($($pin_cfg)*)])? $pin: $pin::steal(), )*
+                        $( $(#[cfg($($inst_cfg)*)])? $inst: $inst_steal, )*
+                    }
+                }
+            }
+        }
     };
-    // 引脚名 -> port*8+pin 编码，由宏展开时静态求值。
-    (@num P01) => { 0 * 8 + 1 };
-    (@num P02) => { 0 * 8 + 2 };
-    (@num P03) => { 0 * 8 + 3 };
-    (@num P14) => { 1 * 8 + 4 };
-    (@num P15) => { 1 * 8 + 5 };
-    (@num P23) => { 2 * 8 + 3 };
-    (@num P24) => { 2 * 8 + 4 };
-    (@num P25) => { 2 * 8 + 5 };
-    (@num P26) => { 2 * 8 + 6 };
-    (@num P27) => { 2 * 8 + 7 };
-    (@num P31) => { 3 * 8 + 1 };
-    (@num P32) => { 3 * 8 + 2 };
-    (@num P33) => { 3 * 8 + 3 };
-    (@num P34) => { 3 * 8 + 4 };
-    (@num P35) => { 3 * 8 + 5 };
-    (@num P36) => { 3 * 8 + 6 };
 }
 
-use crate::peripheral::Peri;
-
-pin_singletons!(
-    P01, P02,
-    /// 仅 20 引脚封装（C 系列）引出。
-    #[cfg(feature = "hc32l110-full-pins")]
-    P03,
-    P14, P15,
-    P23, P24, P25, P26, P27,
-    P31,
-    /// 仅 20 引脚封装（C 系列）引出。
-    #[cfg(feature = "hc32l110-full-pins")]
-    P32,
-    /// 仅 20 引脚封装（C 系列）引出。
-    #[cfg(feature = "hc32l110-full-pins")]
-    P33,
-    /// 仅 20 引脚封装（C 系列）引出。
-    #[cfg(feature = "hc32l110-full-pins")]
-    P34,
-    P35, P36,
-);
+l110_peripherals! {
+    pins {
+        /// 端口 P0 引脚（P00/RESETB 除外，见模块文档末尾）。
+        P01 = (0, 1),
+        /// 端口 P0 引脚。
+        P02 = (0, 2),
+        /// 仅 20 引脚封装（TSSOP20/QFN20，C 系列）引出。
+        #[cfg(feature = "hc32l110-full-pins")]
+        P03 = (0, 3),
+        /// 端口 P1 引脚。
+        P14 = (1, 4),
+        /// 端口 P1 引脚。
+        P15 = (1, 5),
+        /// 端口 P2 引脚。
+        P23 = (2, 3),
+        /// 端口 P2 引脚。
+        P24 = (2, 4),
+        /// 端口 P2 引脚。
+        P25 = (2, 5),
+        /// 端口 P2 引脚。
+        P26 = (2, 6),
+        /// 端口 P2 引脚。
+        P27 = (2, 7),
+        /// 端口 P3 引脚。
+        P31 = (3, 1),
+        /// 仅 20 引脚封装（C 系列）引出。
+        #[cfg(feature = "hc32l110-full-pins")]
+        P32 = (3, 2),
+        /// 仅 20 引脚封装（C 系列）引出。
+        #[cfg(feature = "hc32l110-full-pins")]
+        P33 = (3, 3),
+        /// 仅 20 引脚封装（C 系列）引出。
+        #[cfg(feature = "hc32l110-full-pins")]
+        P34 = (3, 4),
+        /// 端口 P3 引脚。
+        P35 = (3, 5),
+        /// 端口 P3 引脚。
+        P36 = (3, 6),
+    }
+    instances {
+        /// 基本定时器 TIM0。
+        #[cfg(all(bt_ddl_v1, peri_bt0))]
+        BT0: Peri<'static, crate::bt::Bt0> => crate::bt::Bt0::steal(),
+        /// 基本定时器 TIM1。
+        #[cfg(all(bt_ddl_v1, peri_bt1))]
+        BT1: Peri<'static, crate::bt::Bt1> => crate::bt::Bt1::steal(),
+        /// 基本定时器 TIM2。
+        #[cfg(all(bt_ddl_v1, peri_bt2))]
+        BT2: Peri<'static, crate::bt::Bt2> => crate::bt::Bt2::steal(),
+        /// 低功耗定时器。
+        #[cfg(all(lptim_ddl_v1, peri_lptimer))]
+        LPTIM: Peri<'static, crate::lptim::LpTim> => crate::lptim::LpTim::steal(),
+        /// 可编程计数阵列。
+        #[cfg(all(pca_ddl_v1, peri_pca))]
+        PCA: Peri<'static, crate::pca::PcaPeri> => crate::pca::PcaPeri::steal(),
+        /// 高级定时器 TIM4。
+        #[cfg(all(adt_ddl_v1, peri_adt0))]
+        ADT0: Peri<'static, crate::adt::Adt0> => crate::adt::Adt0::steal(),
+        /// 高级定时器 TIM5。
+        #[cfg(all(adt_ddl_v1, peri_adt1))]
+        ADT1: Peri<'static, crate::adt::Adt1> => crate::adt::Adt1::steal(),
+        /// 高级定时器 TIM6。
+        #[cfg(all(adt_ddl_v1, peri_adt2))]
+        ADT2: Peri<'static, crate::adt::Adt2> => crate::adt::Adt2::steal(),
+        /// UART0。
+        #[cfg(all(uart_ddl_v1, peri_uart0))]
+        UART0: Peri<'static, crate::uart::Uart0> => crate::uart::Uart0::steal(),
+        /// UART1。
+        #[cfg(all(uart_ddl_v1, peri_uart1))]
+        UART1: Peri<'static, crate::uart::Uart1> => crate::uart::Uart1::steal(),
+        /// 低功耗 UART。
+        #[cfg(all(lpuart_ddl_v1, peri_lpuart))]
+        LPUART: Peri<'static, crate::uart::LpUartPeri> => crate::uart::LpUartPeri::steal(),
+    }
+}
 
 /// P00/RESETB 为复位输入，方向与上拉等控制位保留，暂不作为 GPIO 暴露。
-
-/// 外设集合：每字段是对应单例的独占引用。
-///
-/// 引脚单例属于 GPIO 驱动（后端 `gpio_ddl_v2`）；定时器、串口等字段
-/// 由实例 cfg `peri_<实例>`（build.rs 从 PAC 元数据派生）控制，后续
-/// 型号按其实例清单自动增减。
-pub struct Peripherals {
-    /// 端口 P0 引脚（P00/RESETB 除外，见模块文档）。
-    #[cfg(feature = "hc32l110-full-pins")]
-    pub P03: Peri<'static, P03>,
-    pub P01: Peri<'static, P01>,
-    pub P02: Peri<'static, P02>,
-    /// 端口 P1 引脚。
-    pub P14: Peri<'static, P14>,
-    pub P15: Peri<'static, P15>,
-    /// 端口 P2 引脚。
-    pub P23: Peri<'static, P23>,
-    pub P24: Peri<'static, P24>,
-    pub P25: Peri<'static, P25>,
-    pub P26: Peri<'static, P26>,
-    pub P27: Peri<'static, P27>,
-    /// 端口 P3 引脚。
-    pub P31: Peri<'static, P31>,
-    #[cfg(feature = "hc32l110-full-pins")]
-    pub P32: Peri<'static, P32>,
-    #[cfg(feature = "hc32l110-full-pins")]
-    pub P33: Peri<'static, P33>,
-    #[cfg(feature = "hc32l110-full-pins")]
-    pub P34: Peri<'static, P34>,
-    pub P35: Peri<'static, P35>,
-    pub P36: Peri<'static, P36>,
-    /// 基本定时器 TIM0。
-    #[cfg(all(bt_ddl_v1, peri_bt0))]
-    pub BT0: Peri<'static, crate::bt::Bt0>,
-    /// 基本定时器 TIM1。
-    #[cfg(all(bt_ddl_v1, peri_bt1))]
-    pub BT1: Peri<'static, crate::bt::Bt1>,
-    /// 基本定时器 TIM2。
-    #[cfg(all(bt_ddl_v1, peri_bt2))]
-    pub BT2: Peri<'static, crate::bt::Bt2>,
-    /// 低功耗定时器。
-    #[cfg(all(lptim_ddl_v1, peri_lptimer))]
-    pub LPTIM: Peri<'static, crate::lptim::LpTim>,
-    /// 可编程计数阵列。
-    #[cfg(all(pca_ddl_v1, peri_pca))]
-    pub PCA: Peri<'static, crate::pca::PcaPeri>,
-    /// 高级定时器 TIM4。
-    #[cfg(all(adt_ddl_v1, peri_adt0))]
-    pub ADT0: Peri<'static, crate::adt::Adt0>,
-    /// 高级定时器 TIM5。
-    #[cfg(all(adt_ddl_v1, peri_adt1))]
-    pub ADT1: Peri<'static, crate::adt::Adt1>,
-    /// 高级定时器 TIM6。
-    #[cfg(all(adt_ddl_v1, peri_adt2))]
-    pub ADT2: Peri<'static, crate::adt::Adt2>,
-    /// UART0。
-    #[cfg(all(uart_ddl_v1, peri_uart0))]
-    pub UART0: Peri<'static, crate::uart::Uart0>,
-    /// UART1。
-    #[cfg(all(uart_ddl_v1, peri_uart1))]
-    pub UART1: Peri<'static, crate::uart::Uart1>,
-    /// 低功耗 UART。
-    #[cfg(all(lpuart_ddl_v1, peri_lpuart))]
-    pub LPUART: Peri<'static, crate::uart::LpUartPeri>,
-}
 
 static TAKEN: AtomicBool = AtomicBool::new(false);
 
@@ -170,59 +215,5 @@ impl Peripherals {
         TAKEN.store(true, Ordering::Relaxed);
         // safety: TAKEN 保证这是唯一一次构造。
         unsafe { Self::steal() }
-    }
-
-    /// 不经独占检查构造外设集合。
-    ///
-    /// # Safety
-    ///
-    /// 调用方须保证所有单例不被两处同时持有。
-    pub unsafe fn steal() -> Self {
-        unsafe {
-            Self {
-                P01: P01::steal(),
-                P02: P02::steal(),
-                #[cfg(feature = "hc32l110-full-pins")]
-                P03: P03::steal(),
-                P14: P14::steal(),
-                P15: P15::steal(),
-                P23: P23::steal(),
-                P24: P24::steal(),
-                P25: P25::steal(),
-                P26: P26::steal(),
-                P27: P27::steal(),
-                P31: P31::steal(),
-                #[cfg(feature = "hc32l110-full-pins")]
-                P32: P32::steal(),
-                #[cfg(feature = "hc32l110-full-pins")]
-                P33: P33::steal(),
-                #[cfg(feature = "hc32l110-full-pins")]
-                P34: P34::steal(),
-                P35: P35::steal(),
-                P36: P36::steal(),
-                #[cfg(all(bt_ddl_v1, peri_bt0))]
-                BT0: crate::bt::Bt0::steal(),
-                #[cfg(all(bt_ddl_v1, peri_bt1))]
-                BT1: crate::bt::Bt1::steal(),
-                #[cfg(all(bt_ddl_v1, peri_bt2))]
-                BT2: crate::bt::Bt2::steal(),
-                #[cfg(all(lptim_ddl_v1, peri_lptimer))]
-                LPTIM: crate::lptim::LpTim::steal(),
-                #[cfg(all(pca_ddl_v1, peri_pca))]
-                PCA: crate::pca::PcaPeri::steal(),
-                #[cfg(all(adt_ddl_v1, peri_adt0))]
-                ADT0: crate::adt::Adt0::steal(),
-                #[cfg(all(adt_ddl_v1, peri_adt1))]
-                ADT1: crate::adt::Adt1::steal(),
-                #[cfg(all(adt_ddl_v1, peri_adt2))]
-                ADT2: crate::adt::Adt2::steal(),
-                #[cfg(all(uart_ddl_v1, peri_uart0))]
-                UART0: crate::uart::Uart0::steal(),
-                #[cfg(all(uart_ddl_v1, peri_uart1))]
-                UART1: crate::uart::Uart1::steal(),
-                #[cfg(all(lpuart_ddl_v1, peri_lpuart))]
-                LPUART: crate::uart::LpUartPeri::steal(),
-            }
-        }
     }
 }

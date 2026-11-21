@@ -93,8 +93,11 @@ fn main() {
     // 开头。内部家族/封装 feature（hc32l110、hc32l110-full-pins）在
     // metapac 无同名芯片 feature，只选它们等于不选料号，需精确排除
     // （不能按前缀排除：hc32l110b4pa 等真料号同样以 hc32l110 开头）。
-    const INTERNAL_FEATURES: &[&str] =
-        &["CARGO_FEATURE_HC32L110", "CARGO_FEATURE_HC32L110_FULL_PINS"];
+    const INTERNAL_FEATURES: &[&str] = &[
+        "CARGO_FEATURE_HC32L110",
+        "CARGO_FEATURE_HC32L110_16PIN",
+        "CARGO_FEATURE_HC32L110_FULL_PINS",
+    ];
     let mut chip_features = env::vars().map(|(name, _)| name).filter(|name| {
         name.starts_with("CARGO_FEATURE_HC32") && !INTERNAL_FEATURES.contains(&name.as_str())
     });
