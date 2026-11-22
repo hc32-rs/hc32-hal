@@ -773,6 +773,80 @@ pub(crate) fn set_sel(n: PinId, func: u8) {
     }
 }
 
+/// 配置 XTH 的 PD00/PD01 引脚（RM 3.1.4、3.2.4）。
+///
+/// 晶振模式两脚均为模拟；外部输入模式 PD00 为数字 GPIO 输入，PD01
+/// 禁止另作 GPIO并置为模拟。
+pub(crate) fn setup_xth_pins(bypass: bool) {
+    if bypass {
+        pac::GPIO.pd00_sel().modify(|w| w.set_sel(0));
+        pac::GPIO.pdads().modify(|w| {
+            w.set_pd00(false);
+            w.set_pd01(true);
+        });
+        pac::GPIO.pddir().modify(|w| w.set_pd00(true));
+    } else {
+        pac::GPIO.pdads().modify(|w| {
+            w.set_pd00(true);
+            w.set_pd01(true);
+        });
+    }
+}
+
+/// 配置 XTL 的 PC14/PC15 引脚（RM 3.1.3、3.2.3）。
+///
+/// 晶振模式两脚均为模拟；外部输入模式 PC14 为数字 GPIO 输入，PC15
+/// 禁止另作 GPIO并置为模拟。
+pub(crate) fn setup_xtl_pins(bypass: bool) {
+    if bypass {
+        pac::GPIO.pc14_sel().modify(|w| w.set_sel(0));
+        pac::GPIO.pcads().modify(|w| {
+            w.set_pc14(false);
+            w.set_pc15(true);
+        });
+        pac::GPIO.pcdir().modify(|w| w.set_pc14(true));
+    } else {
+        pac::GPIO.pcads().modify(|w| {
+            w.set_pc14(true);
+            w.set_pc15(true);
+        });
+    }
+}
+
+/// PA01 输出分频后的 HCLK（复用 6，RM 6.3.4）。
+pub(crate) fn enable_hclk_output_pa01(div: u8) {
+    enable();
+    pac::GPIO.paads().modify(|w| w.set_pa01(false));
+    pac::GPIO.pa01_sel().modify(|w| w.set_sel(6));
+    pac::GPIO.padir().modify(|w| w.set_pa01(false));
+    pac::GPIO.ctrl1().modify(|w| {
+        w.set_hclk_sel(div);
+        w.set_hclk_en(true);
+    });
+}
+
+/// 停止 PA01 的 HCLK 输出。
+pub(crate) fn disable_hclk_output_pa01() {
+    pac::GPIO.ctrl1().modify(|w| w.set_hclk_en(false));
+}
+
+/// PA02 输出分频后的 PCLK（复用 6，RM 6.3.4）。
+pub(crate) fn enable_pclk_output_pa02(div: u8) {
+    enable();
+    pac::GPIO.paads().modify(|w| w.set_pa02(false));
+    pac::GPIO.pa02_sel().modify(|w| w.set_sel(6));
+    pac::GPIO.padir().modify(|w| w.set_pa02(false));
+    pac::GPIO.ctrl1().modify(|w| {
+        w.set_pclk_sel(div);
+        w.set_pclk_en(true);
+    });
+}
+
+/// 停止 PA02 的 PCLK 输出。
+pub(crate) fn disable_pclk_output_pa02() {
+    pac::GPIO.ctrl1().modify(|w| w.set_pclk_en(false));
+}
+
 /// 未引出引脚的上电处理（HC32L13x 各封装专用）。
 ///
 /// DS 3.1 表下注与 RM 6.3 要求：应用中需将封装未引出的 IO 设为数字输入

@@ -22,18 +22,17 @@
 //! （FLASH_BYPASS 解锁后写 FLASH_CR.WAIT）、切换 `CLK_SW4_SEL`、按新源
 //! 频率复配等待周期、设置分频、关闭不再使用的源。
 //!
-//! HC32L13x（`sysctrl_ddl_v3_1`）当前只接入默认时钟路径：复位默认
-//! RCH 4 MHz、不分频，[`init_default`] 装载 RCH/RCL 出厂 TRIM（对齐
-//! 厂商 SystemInit）；可配置时钟树（RM 3.2 的 5 源切换与 PLL）未接入，
-//! 型号 API 相应收窄（AGENTS.md「仅接入默认时钟的型号只开放已实现的
-//! 时钟能力」）。
+//! HC32L13x（`sysctrl_ddl_v3_1`）支持 RCH/XTH/RCL/XTL/PLL 五源切换、
+//! HCLK/PCLK 分频和外设门控。PLL 输入 4~24 MHz、输出 8~48 MHz，倍频
+//! 2~12；启动前使能 BGR 并等待 20us，FLASH 等待周期随新旧源中较高
+//! 频率配置。PLL 只能与 RCH/XTH 直接切换，其他组合由 [`init`] 自动
+//! 经参考源或 RCH 中转。顶层 `Config::default()` 仍走复位默认 RCH
+//! 4 MHz 与出厂 TRIM 装载路径。
 //!
-//! HC32F420（`sysctrl_ddl_v4`）同样只接入默认时钟路径：复位默认系统
-//! 时钟为 RCHCLKD 4 MHz（RCH 24 MHz 本振 6 分频：RCHCR 复位值 0x2，
-//! DIV 编码 0010 = /6，RM 3.1.2/3.5.6），HCLK = PCLK0 = PCLK1 = 4 MHz；
-//! [`init_default`] 装载 RCH/RCL
-//! 出厂 TRIM，GPIO 门控按端口走 SYSCTRL_AHBEN1 位 0~3（RM 3.5.16）。
-//! 可配置时钟树（RM 3.2 的 4 源切换、PLL）未接入。
+//! HC32F420（`sysctrl_ddl_v4`）支持 RCHCLKD、XTH、RCL、PLL 四个系统
+//! 时钟源，以及 HCLK、PCLK0、PCLK1 分频。[`init`] 按 RM 3.2 使用临时
+//! HCLK 分频完成切换，并同步设置 FLASH_WAIT；[`clocks`] 与 [`pclk1`]
+//! 返回配置后的频率。复位默认仍为 RCHCLKD 4 MHz。
 //!
 //! [`sysctrl_v2_2`]: self::sysctrl_v2_2
 //! [`sysctrl_v3_1`]: self::sysctrl_v3_1
@@ -44,7 +43,9 @@ pub(crate) mod sysctrl_v2_2;
 #[cfg(sysctrl_ddl_v2_2)]
 use sysctrl_v2_2 as backend;
 #[cfg(sysctrl_ddl_v2_2)]
-use sysctrl_v2_2::DEFAULT_RCH_HZ as BACKEND_SYS_HZ;
+mod l110;
+#[cfg(sysctrl_ddl_v2_2)]
+use l110::DEFAULT_RCH_HZ as BACKEND_SYS_HZ;
 
 #[cfg(sysctrl_ddl_v3_1)]
 pub(crate) mod sysctrl_v3_1;
@@ -52,6 +53,8 @@ pub(crate) mod sysctrl_v3_1;
 use sysctrl_v3_1 as backend;
 #[cfg(sysctrl_ddl_v3_1)]
 use sysctrl_v3_1::DEFAULT_RCH_HZ as BACKEND_SYS_HZ;
+#[cfg(sysctrl_ddl_v3_1)]
+mod l13x;
 
 #[cfg(sysctrl_ddl_v4)]
 pub(crate) mod sysctrl_v4;
@@ -59,6 +62,10 @@ pub(crate) mod sysctrl_v4;
 use sysctrl_v4 as backend;
 #[cfg(sysctrl_ddl_v4)]
 use sysctrl_v4::DEFAULT_SYSCLK_HZ as BACKEND_SYS_HZ;
+#[cfg(sysctrl_ddl_v4)]
+mod f420;
+#[cfg(sysctrl_ddl_v4)]
+pub use f420::*;
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -68,8 +75,8 @@ use crate::time::Hertz;
 // 时钟源与档位枚举
 // ---------------------------------------------------------------------------
 
-/// 系统时钟源（SYSCTRL0.CLK_SW4_SEL，RM 3.5.1 位 5:4）。
-#[cfg(sysctrl_ddl_v2_2)]
+/// 系统时钟源（SYSCTRL0.CLKSW，RM 3.5.1）。
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Sysclk {
     /// 内部高速 RC 时钟（编码 0，复位默认）。
@@ -80,9 +87,12 @@ pub enum Sysclk {
     Rcl,
     /// 外部低速晶振（编码 3）。
     Xtl,
+    /// 锁相环输出（编码 4，仅 HC32L13x）。
+    #[cfg(sysctrl_ddl_v3_1)]
+    Pll,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl Sysclk {
     /// 寄存器编码。
     pub const fn encode(self) -> u8 {
@@ -91,6 +101,8 @@ impl Sysclk {
             Sysclk::Xth => 1,
             Sysclk::Rcl => 2,
             Sysclk::Xtl => 3,
+            #[cfg(sysctrl_ddl_v3_1)]
+            Sysclk::Pll => 4,
         }
     }
 
@@ -101,6 +113,8 @@ impl Sysclk {
             1 => Some(Sysclk::Xth),
             2 => Some(Sysclk::Rcl),
             3 => Some(Sysclk::Xtl),
+            #[cfg(sysctrl_ddl_v3_1)]
+            4 => Some(Sysclk::Pll),
             _ => None,
         }
     }
@@ -110,7 +124,7 @@ impl Sysclk {
 ///
 /// 每档对应 flash 出厂校准区（0x00100C00~0x00100C08，RM 3.5.4 TRIM 字段
 /// 描述）的一组 TRIM 值；写入 RCH_CR.TRIM 即得到该频率。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RchFreq {
     /// 24 MHz（校准值 @0x00100C00）。
@@ -125,7 +139,7 @@ pub enum RchFreq {
     Mhz4,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl RchFreq {
     /// 出厂校准值地址（RM 3.5.4）。
     const fn trim_addr(self) -> *const u16 {
@@ -158,23 +172,32 @@ impl RchFreq {
         }
     }
 
-    /// 从 RCH_CR.TRIM 原始值推断档位。
-    ///
-    /// TRIM[10:9] 区分 4/8/16/24 档；22.12M 与 24M 共享编码，需比对出厂
-    /// 校准值才能区分（SDK `Clk_GetHClkFreq` 同做法）。
+    /// 从 RCH_CR.TRIM 原始值推断档位；非出厂校准值按 SDK 规则归入
+    /// 最接近的默认档，仅供保守的换频与延时估算。
+    #[cfg(sysctrl_ddl_v2_2)]
     pub fn from_trim(trim: u16) -> Self {
         match (trim >> 9) & 0x3 {
             0 => RchFreq::Mhz4,
             1 => RchFreq::Mhz8,
             2 => RchFreq::Mhz16,
-            // 与 22.12M 出厂校准值一致则判为 22.12M，否则 24M。
             _ if trim == RchFreq::Mhz22_12.trim_value() => RchFreq::Mhz22_12,
             _ => RchFreq::Mhz24,
         }
     }
 
-    /// RM 3.2.7 方案 1 的逐级换频档位：4/8/16 为独立级，22.12M 与 24M
-    /// 同为顶档。
+    /// L13x SDK 按完整出厂校准值识别档位，未知值归入复位默认 4 MHz。
+    #[cfg(sysctrl_ddl_v3_1)]
+    pub fn from_trim(trim: u16) -> Self {
+        match trim {
+            _ if trim == RchFreq::Mhz24.trim_value() => RchFreq::Mhz24,
+            _ if trim == RchFreq::Mhz22_12.trim_value() => RchFreq::Mhz22_12,
+            _ if trim == RchFreq::Mhz16.trim_value() => RchFreq::Mhz16,
+            _ if trim == RchFreq::Mhz8.trim_value() => RchFreq::Mhz8,
+            _ => RchFreq::Mhz4,
+        }
+    }
+
+    /// RCH 换频的逐级档位：4/8/16 为独立级，22.12M 与 24M 同为顶档。
     const fn step_level(self) -> u8 {
         match self {
             RchFreq::Mhz4 => 0,
@@ -186,16 +209,16 @@ impl RchFreq {
 }
 
 /// RCL 输出频率档位（RCL_CR.TRIM，校准值 @0x00100C20/22，RM 3.5.6）。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RclFreq {
-    /// 38.4 kHz（校准值 @0x00100C20，TRIM 位 9 = 1）。
+    /// 38.4 kHz（校准值 @0x00100C20）。
     K38_4,
-    /// 32.768 kHz（校准值 @0x00100C22，TRIM 位 9 = 0）。
+    /// 32.768 kHz（校准值 @0x00100C22）。
     K32_768,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl RclFreq {
     /// 出厂校准值地址（RM 3.5.6）。
     const fn trim_addr(self) -> *const u16 {
@@ -220,8 +243,39 @@ impl RclFreq {
     }
 }
 
-/// XTH 工作频率范围（XTH_CR.DRIVER[3:2]，RM 3.5.5）。
-#[cfg(sysctrl_ddl_v2_2)]
+/// PLL 参考时钟源（PLL_CR.REFSEL，仅 HC32L13x）。
+#[cfg(sysctrl_ddl_v3_1)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum PllSource {
+    /// 内部高速 RC。
+    Rch,
+    /// XTH 晶振或 PD00 外部输入，由 [`XthConfig::bypass`] 决定。
+    Xth,
+}
+
+/// PLL 配置（仅 HC32L13x）。
+///
+/// 输出频率为 `输入频率 × multiplier`。初始化会检查输入 4~24 MHz、
+/// 倍频系数 2~12、输出 8~48 MHz，并自动设置 FRSEL/FOSC 与最长稳定时间。
+#[cfg(sysctrl_ddl_v3_1)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct PllConfig {
+    /// 参考时钟源。
+    pub source: PllSource,
+    /// 倍频系数，允许 2~12。
+    pub multiplier: u8,
+}
+
+#[cfg(sysctrl_ddl_v3_1)]
+impl PllConfig {
+    /// 创建 PLL 配置；参数合法性在 [`init`] 时检查。
+    pub const fn new(source: PllSource, multiplier: u8) -> Self {
+        Self { source, multiplier }
+    }
+}
+
+/// XTH 工作频率范围（XTH_CR.XTH_FSEL，RM 3.5.5）。
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum XthFreqRange {
     /// 4~8 MHz（编码 00）。
@@ -234,7 +288,7 @@ pub enum XthFreqRange {
     Mhz24_32,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl XthFreqRange {
     const fn encode(self) -> u8 {
         match self {
@@ -247,7 +301,7 @@ impl XthFreqRange {
 }
 
 /// XTH 晶振驱动能力（XTH_CR.DRIVER[1:0]，RM 3.5.5）。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum XthDriver {
     /// 最弱驱动（编码 00）。
@@ -260,7 +314,7 @@ pub enum XthDriver {
     Strongest,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl XthDriver {
     const fn encode(self) -> u8 {
         match self {
@@ -272,8 +326,8 @@ impl XthDriver {
     }
 }
 
-/// XTL 振荡幅度档位（XTL_CR.DRIVER[3:2]，RM 3.5.7）。
-#[cfg(sysctrl_ddl_v2_2)]
+/// XTL 振荡幅度档位（XTL_CR.AMP_SEL，RM 3.5.7）。
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum XtlAmplitude {
     /// 最小振幅（编码 00）。
@@ -286,7 +340,7 @@ pub enum XtlAmplitude {
     Max,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl XtlAmplitude {
     const fn encode(self) -> u8 {
         match self {
@@ -301,7 +355,7 @@ impl XtlAmplitude {
 /// XTL 晶振驱动能力（XTL_CR.DRIVER[1:0]，RM 3.5.7）。
 ///
 /// 注意编码与 XTH 不同：XTL 的默认档为 01。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum XtlDriver {
     /// 最弱驱动（编码 00）。
@@ -314,7 +368,7 @@ pub enum XtlDriver {
     Strongest,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl XtlDriver {
     const fn encode(self) -> u8 {
         match self {
@@ -329,7 +383,7 @@ impl XtlDriver {
 /// 晶振稳定时间档位（XTH_CR/XTL_CR.STARTUP，RM 3.5.5/3.5.7）。
 ///
 /// RM 3.5.5 强烈建议 XTH 使用 `Cycles16384`。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum CrystalStartup {
     /// 256 周期（编码 00）。
@@ -342,7 +396,7 @@ pub enum CrystalStartup {
     Cycles16384,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl CrystalStartup {
     const fn encode(self) -> u8 {
         match self {
@@ -355,7 +409,7 @@ impl CrystalStartup {
 }
 
 /// RCL 稳定时间档位（RCL_CR.STARTUP，RM 3.5.6 位 11:10）。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RclStartup {
     /// 4 周期（编码 00）。
@@ -368,7 +422,7 @@ pub enum RclStartup {
     Cycles256,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl RclStartup {
     const fn encode(self) -> u8 {
         match self {
@@ -387,7 +441,7 @@ impl RclStartup {
 /// HCLK 分频（SYSCTRL0.HCLK_PRS，RM 3.5.1 位 8:6）。
 ///
 /// 判别值即寄存器编码（log2 分频比）。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
 pub enum HclkPrescaler {
     /// SystemClk/1（编码 0，复位默认）。
@@ -409,7 +463,7 @@ pub enum HclkPrescaler {
     Div128 = 7,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl crate::time::Prescaler for HclkPrescaler {
     fn num(&self) -> u32 {
         1
@@ -423,7 +477,7 @@ impl crate::time::Prescaler for HclkPrescaler {
 /// PCLK 分频（SYSCTRL0.PCLK_PRS，RM 3.5.1 位 10:9）。
 ///
 /// 判别值即寄存器编码（log2 分频比）。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
 pub enum PclkPrescaler {
     /// HCLK/1（编码 0，复位默认）。
@@ -437,7 +491,7 @@ pub enum PclkPrescaler {
     Div8 = 3,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl crate::time::Prescaler for PclkPrescaler {
     fn num(&self) -> u32 {
         1
@@ -453,22 +507,22 @@ impl crate::time::Prescaler for PclkPrescaler {
 // ---------------------------------------------------------------------------
 
 /// XTH 配置。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct XthConfig {
-    /// 晶振工作频率范围，选取 DRIVER[3:2] 编码。
+    /// 晶振工作频率范围（XTH_FSEL）。
     pub freq_range: XthFreqRange,
     /// 驱动能力（DRIVER[1:0]）。
     pub driver: XthDriver,
     /// 稳定时间档位（STARTUP）。
     pub startup: CrystalStartup,
-    /// true = P01 引脚外部时钟输入（SYSCTRL1.EXTH_EN），false = 晶振。
+    /// true = 外部时钟输入（L110 P01 / L13x PD00），false = 晶振。
     pub bypass: bool,
     /// 晶振频率或外部输入频率。
     pub freq: Hertz,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl XthConfig {
     /// 晶振模式。
     ///
@@ -498,7 +552,8 @@ impl XthConfig {
         }
     }
 
-    /// 外部输入模式：P01 输入 4~32 MHz（RM 3.1.4），P02 需配为模拟态。
+    /// 外部输入模式：L110 P01 / L13x PD00 输入 4~32 MHz（RM 3.1.4），
+    /// 另一晶振脚需配为模拟态。
     pub fn bypass(freq: Hertz) -> Self {
         debug_assert!(
             (4_000_000..=32_000_000).contains(&freq.0),
@@ -515,47 +570,58 @@ impl XthConfig {
 }
 
 /// XTL 配置。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct XtlConfig {
-    /// 振荡幅度档位（DRIVER[3:2]）。
+    /// 振荡幅度档位（AMP_SEL）。
     pub amplitude: XtlAmplitude,
     /// 驱动能力（DRIVER[1:0]）。
     pub driver: XtlDriver,
     /// 稳定时间档位（STARTUP）。
     pub startup: CrystalStartup,
-    /// true = P14 引脚外部时钟输入（SYSCTRL1.EXTL_EN），false = 晶振。
+    /// true = 外部时钟输入（L110 P14 / L13x PC14），false = 晶振。
     pub bypass: bool,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl XtlConfig {
     /// 32.768 kHz 晶振。
     ///
     /// DRIVER 编码取 DS 7.3.7 推荐值 0b1010（amp=10、driver=10）。RM
-    /// 3.5.7 字段级推荐为 amp=10、driver=01，与 DS 整体推荐不一致，差异
-    /// 见 `docs/sdk-doc-discrepancies/hc32l110.md`，默认取 DS 电气特性表推荐值。
+    /// 3.5.7 字段级推荐为 amp=10、driver=01，与 DS 整体推荐不一致，默认
+    /// 取 DS 电气特性表推荐值。L13x 的稳定时间另按 DS 注 4 取 16384。
     pub fn crystal() -> Self {
         Self {
             amplitude: XtlAmplitude::Large,
             driver: XtlDriver::Stronger,
-            startup: CrystalStartup::Cycles4096,
+            startup: default_xtl_startup(),
             bypass: false,
         }
     }
 
-    /// 外部输入模式：P14 输入 32.768 kHz（RM 3.1.3），P15 需配为模拟态。
+    /// 外部输入模式：L110 P14 / L13x PC14 输入 32.768 kHz，另一晶振脚
+    /// 需配为模拟态。
     pub fn bypass() -> Self {
         Self {
             amplitude: XtlAmplitude::Large,
             driver: XtlDriver::Stronger,
-            startup: CrystalStartup::Cycles4096,
+            startup: default_xtl_startup(),
             bypass: true,
         }
     }
 }
 
 #[cfg(sysctrl_ddl_v2_2)]
+const fn default_xtl_startup() -> CrystalStartup {
+    CrystalStartup::Cycles4096
+}
+
+#[cfg(sysctrl_ddl_v3_1)]
+const fn default_xtl_startup() -> CrystalStartup {
+    CrystalStartup::Cycles16384
+}
+
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl Default for XtlConfig {
     fn default() -> Self {
         Self::crystal()
@@ -593,7 +659,7 @@ impl SysTickClock {
 }
 
 /// RTC 高速补偿时钟选择（SYSCTRL1.RTC_FREQ_ADJUST，RM 3.5.2 位 11:9）。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum RtcAdjustFreq {
     /// 4 MHz（编码 000）。
@@ -614,7 +680,7 @@ pub enum RtcAdjustFreq {
     Mhz32,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl RtcAdjustFreq {
     const fn encode(self) -> u8 {
         match self {
@@ -630,71 +696,80 @@ impl RtcAdjustFreq {
     }
 }
 
-/// 外设门控位（PERI_CLKEN，RM 3.5.8）。
+/// 外设门控位（PERI_CLKEN，L110 RM 3.5.8 / L13x RM 3.5.9）。
 ///
 /// 该寄存器不在 SYSCTRL0/1 解锁范围内，读-改-写直接操作。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum PeripheralGate {
-    /// UART0（位 0）。
     Uart0,
-    /// UART1（位 1）。
     Uart1,
-    /// LPUART（位 2）。
+    #[cfg(sysctrl_ddl_v2_2)]
     Lpuart,
-    /// I2C（位 4）。
+    #[cfg(sysctrl_ddl_v3_1)]
+    Lpuart0,
+    #[cfg(sysctrl_ddl_v3_1)]
+    Lpuart1,
+    #[cfg(sysctrl_ddl_v2_2)]
     I2c,
-    /// SPI（位 6）。
+    #[cfg(sysctrl_ddl_v3_1)]
+    I2c0,
+    #[cfg(sysctrl_ddl_v3_1)]
+    I2c1,
+    #[cfg(sysctrl_ddl_v2_2)]
     Spi,
+    #[cfg(sysctrl_ddl_v3_1)]
+    Spi0,
+    #[cfg(sysctrl_ddl_v3_1)]
+    Spi1,
     /// Timer0/1/2（位 8）。
     BaseTim,
-    /// LPTimer（位 9）。
     LpTim,
     /// Timer4/5/6（位 10）。
     AdvTim,
-    /// PCA（位 14）。
+    #[cfg(sysctrl_ddl_v3_1)]
+    Tim3,
+    #[cfg(sysctrl_ddl_v3_1)]
+    Opa,
     Pca,
-    /// WDT（位 15）。
     Wdt,
-    /// ADC（位 16）。
+    /// ADC；L13x 上同时门控 BGR（位 16）。
     Adc,
     /// VC/LVD（位 17）。
     Vc,
-    /// RTC（位 20）。
+    #[cfg(sysctrl_ddl_v3_1)]
+    Rng,
+    #[cfg(sysctrl_ddl_v3_1)]
+    Pcnt,
     Rtc,
-    /// CLKTRIM（位 21）。
     Trim,
+    #[cfg(sysctrl_ddl_v3_1)]
+    Lcd,
     /// SysTick 参考时钟（位 24）。
     Tick,
-    /// CRC（位 26）。
+    #[cfg(sysctrl_ddl_v3_1)]
+    Swd,
     Crc,
-    /// GPIO（位 28）。
+    #[cfg(sysctrl_ddl_v3_1)]
+    Aes,
     Gpio,
-    /// Flash 控制器（位 31）。
+    #[cfg(sysctrl_ddl_v3_1)]
+    Dma,
+    #[cfg(sysctrl_ddl_v3_1)]
+    Div,
     Flash,
 }
 
 /// 开启 GPIO 外设时钟门控，幂等（单外设多端口布局）。
 ///
-/// GPIO 初始化路径（[`crate::init`] 与各 GPIO/复用构造入口）统一经由
-/// 当前型号的系统控制器打开门控。读取-修改-写回非原子：若中断处理器
-/// 也会开关 GPIO 门控，需调用方自行用临界区保护。驱动构造路径只在启动
-/// 阶段执行，通常无需额外保护。
+/// 读取-修改-写回非原子：若中断处理器也会开关 GPIO 门控，需调用方自行
+/// 用临界区保护。
 #[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub(crate) fn enable_gpio() {
-    #[cfg(sysctrl_ddl_v2_2)]
     enable_peripheral(PeripheralGate::Gpio, true);
-    // L13x 的 PERI_CLKEN 门控位布局与 L110 不同（含 TIM3/OPA/RNG 等），
-    // 门控 API 待驱动接入时再开放，GPIO 位直接经后端置位。
-    #[cfg(sysctrl_ddl_v3_1)]
-    backend::modify_peri_clken(|w| w.set_gpio(true));
 }
 
 /// 开启 `port` 端口 GPIO 实例的时钟门控，幂等（按端口独立门控布局）。
-///
-/// GPIO 后端把 PinId.port 转发到这里：AHB1EN 位 0~3 = GPIOA~GPIOD
-/// （RM 3.5.16），复位为关，门控关闭时对该端口寄存器的访问不生效。
-/// 读-改-写非原子，注意事项同 [`enable_gpio`]。
 #[cfg(sysctrl_ddl_v4)]
 pub(crate) fn enable_gpio(port: u8) {
     backend::enable_gpio(port);
@@ -703,52 +778,118 @@ pub(crate) fn enable_gpio(port: u8) {
 /// 设置外设时钟门控。
 ///
 /// 读取-修改-写回非原子；中断处理器同时操作门控时需调用方加临界区。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub fn enable_peripheral(gate: PeripheralGate, enable: bool) {
     backend::modify_peri_clken(|w| match gate {
         PeripheralGate::Uart0 => w.set_uart0(enable),
         PeripheralGate::Uart1 => w.set_uart1(enable),
+        #[cfg(sysctrl_ddl_v2_2)]
         PeripheralGate::Lpuart => w.set_lpuart(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Lpuart0 => w.set_lpuart0(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Lpuart1 => w.set_lpuart1(enable),
+        #[cfg(sysctrl_ddl_v2_2)]
         PeripheralGate::I2c => w.set_i2c(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::I2c0 => w.set_i2c0(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::I2c1 => w.set_i2c1(enable),
+        #[cfg(sysctrl_ddl_v2_2)]
         PeripheralGate::Spi => w.set_spi(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Spi0 => w.set_spi0(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Spi1 => w.set_spi1(enable),
         PeripheralGate::BaseTim => w.set_basetim(enable),
         PeripheralGate::LpTim => w.set_lptim(enable),
         PeripheralGate::AdvTim => w.set_advtim(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Tim3 => w.set_tim3(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Opa => w.set_opa(enable),
         PeripheralGate::Pca => w.set_pca(enable),
         PeripheralGate::Wdt => w.set_wdt(enable),
         PeripheralGate::Adc => w.set_adc(enable),
         PeripheralGate::Vc => w.set_vc(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Rng => w.set_rng(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Pcnt => w.set_pcnt(enable),
         PeripheralGate::Rtc => w.set_rtc(enable),
         PeripheralGate::Trim => w.set_trim(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Lcd => w.set_lcd(enable),
         PeripheralGate::Tick => w.set_tick(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Swd => w.set_swd(enable),
         PeripheralGate::Crc => w.set_crc(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Aes => w.set_aes(enable),
         PeripheralGate::Gpio => w.set_gpio(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Dma => w.set_dma(enable),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Div => w.set_div(enable),
         PeripheralGate::Flash => w.set_flash(enable),
     });
 }
 
 /// 查询外设时钟门控状态。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub fn is_peripheral_enabled(gate: PeripheralGate) -> bool {
     let r = backend::read_peri_clken();
     match gate {
         PeripheralGate::Uart0 => r.uart0(),
         PeripheralGate::Uart1 => r.uart1(),
+        #[cfg(sysctrl_ddl_v2_2)]
         PeripheralGate::Lpuart => r.lpuart(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Lpuart0 => r.lpuart0(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Lpuart1 => r.lpuart1(),
+        #[cfg(sysctrl_ddl_v2_2)]
         PeripheralGate::I2c => r.i2c(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::I2c0 => r.i2c0(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::I2c1 => r.i2c1(),
+        #[cfg(sysctrl_ddl_v2_2)]
         PeripheralGate::Spi => r.spi(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Spi0 => r.spi0(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Spi1 => r.spi1(),
         PeripheralGate::BaseTim => r.basetim(),
         PeripheralGate::LpTim => r.lptim(),
         PeripheralGate::AdvTim => r.advtim(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Tim3 => r.tim3(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Opa => r.opa(),
         PeripheralGate::Pca => r.pca(),
         PeripheralGate::Wdt => r.wdt(),
         PeripheralGate::Adc => r.adc(),
         PeripheralGate::Vc => r.vc(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Rng => r.rng(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Pcnt => r.pcnt(),
         PeripheralGate::Rtc => r.rtc(),
         PeripheralGate::Trim => r.trim(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Lcd => r.lcd(),
         PeripheralGate::Tick => r.tick(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Swd => r.swd(),
         PeripheralGate::Crc => r.crc(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Aes => r.aes(),
         PeripheralGate::Gpio => r.gpio(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Dma => r.dma(),
+        #[cfg(sysctrl_ddl_v3_1)]
+        PeripheralGate::Div => r.div(),
         PeripheralGate::Flash => r.flash(),
     }
 }
@@ -790,8 +931,7 @@ impl Default for Clocks {
 static SYS_HZ: AtomicU32 = AtomicU32::new(BACKEND_SYS_HZ);
 static HCLK_HZ: AtomicU32 = AtomicU32::new(BACKEND_SYS_HZ);
 static PCLK_HZ: AtomicU32 = AtomicU32::new(BACKEND_SYS_HZ);
-// F420 的第二根 APB 总线时钟（复位默认与 PCLK0 相同；可配置时钟树
-// 接入后由 store 路径更新）。
+// F420 的第二根 APB 总线时钟，由时钟初始化与 store 路径一并更新。
 #[cfg(sysctrl_ddl_v4)]
 static PCLK1_HZ: AtomicU32 = AtomicU32::new(BACKEND_SYS_HZ);
 
@@ -815,10 +955,8 @@ pub fn pclk1() -> Hertz {
     Hertz(PCLK1_HZ.load(Ordering::Relaxed))
 }
 
-// L13x/F420 默认路径不经此更新（快照保持 BACKEND_SYS_HZ 默认值），
-// 仅 sysctrl_ddl_v2_2 的可配置时钟树调用。
-#[cfg(sysctrl_ddl_v2_2)]
-#[allow(dead_code)]
+// 各可配置时钟树在切换完成后写入；默认路径保持复位默认快照。
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1, sysctrl_ddl_v4))]
 fn store_clocks(c: Clocks) {
     SYS_HZ.store(c.sys.0, Ordering::Relaxed);
     HCLK_HZ.store(c.hclk.0, Ordering::Relaxed);
@@ -842,9 +980,9 @@ fn store_clocks(c: Clocks) {
 /// 装载后系统时钟保持复位默认：L13x 为 RCH 4 MHz（SYSCTRL0 复位值
 /// 0x0000_0001，RM 3.5.1），F420 为 RCHCLKD 4 MHz（RCH 24 MHz 经
 /// RCHCR.DIV = 2 分频，RM 3.1.2/3.5.6），HCLK = PCLK = 4 MHz，频率
-/// 快照与 [`clocks`] 默认值一致。可配置时钟树（多源切换、PLL，各 RM
-/// 3.2）未接入，接入后由 `Config` 形式的 API 取代（AGENTS.md「仅接入
-/// 默认时钟的型号只开放已实现的时钟能力」）。
+/// 快照与 [`clocks`] 默认值一致。需要其他时钟树时改用 [`init`]。
+/// F420 若已使用 22.12 MHz RCH 档，重复调用本函数会将 TRIM 恢复为
+/// 24 MHz 出厂档；此时应重新调用 [`init`] 并更新频率快照。
 ///
 /// [`clock::Config`]: Config
 #[cfg(any(sysctrl_ddl_v3_1, sysctrl_ddl_v4))]
@@ -853,7 +991,7 @@ pub fn init_default() {
 }
 
 /// 时钟配置。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
     /// RCH 档位。`None` = 保持当前档位不重配。
@@ -864,18 +1002,21 @@ pub struct Config {
     pub rcl: Option<RclFreq>,
     /// XTL 配置。`None` = 不启用 XTL。
     pub xtl: Option<XtlConfig>,
+    /// PLL 配置（仅 L13x）。`None` = 不启用 PLL。
+    #[cfg(sysctrl_ddl_v3_1)]
+    pub pll: Option<PllConfig>,
     /// 系统时钟源。
     pub sys: Sysclk,
     /// HCLK 分频。
     pub hclk_pre: HclkPrescaler,
     /// PCLK 分频。
     pub pclk_pre: PclkPrescaler,
-    /// 时钟故障检测（SYSCTRL1.CLOCK_FT_EN）。SDK clk.h 定义为时钟故障
-    /// 检测使能；RM 3.5.2 位 4 标记 Reserved，差异见差异台账。
+    /// 时钟故障检测（仅 L110；L13x 的对应位为保留位）。
+    #[cfg(sysctrl_ddl_v2_2)]
     pub clock_fault_detect: bool,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -883,116 +1024,27 @@ impl Default for Config {
             xth: None,
             rcl: None,
             xtl: None,
+            #[cfg(sysctrl_ddl_v3_1)]
+            pll: None,
             sys: Sysclk::Rch,
             hclk_pre: HclkPrescaler::Div1,
             pclk_pre: PclkPrescaler::Div1,
+            #[cfg(sysctrl_ddl_v2_2)]
             clock_fault_detect: false,
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// 内部工具：晶振引脚、换频步进
-// ---------------------------------------------------------------------------
-
-/// 读当前系统时钟源。
-#[cfg(sysctrl_ddl_v2_2)]
-fn current_source() -> Sysclk {
-    Sysclk::decode(backend::read_sysctrl0().clk_sw4_sel()).unwrap_or(Sysclk::Rch)
-}
-
-/// 当前 HCLK 频率，用于软件延时估算。
+/// 按配置初始化 HC32L13x 时钟树，可重复调用。
 ///
-/// XTH 为当前源时晶振频率未知，按 32 MHz 保守估计（延时只会长不会短）。
-#[cfg(sysctrl_ddl_v2_2)]
-fn current_hclk_hz() -> u32 {
-    let sys = match current_source() {
-        Sysclk::Rch => {
-            RchFreq::from_trim(backend::read_rch_cr().trim())
-                .frequency()
-                .0
-        }
-        Sysclk::Rcl => {
-            let trim = backend::read_rcl_cr().trim();
-            if trim & (1 << 9) != 0 {
-                RclFreq::K38_4.frequency().0
-            } else {
-                RclFreq::K32_768.frequency().0
-            }
-        }
-        Sysclk::Xth => 32_000_000,
-        Sysclk::Xtl => 32_768,
-    };
-    let prs = backend::read_sysctrl0().hclk_prs();
-    sys >> prs
+/// PLL 只允许与 RCH/XTH 直接切换；其他组合由驱动自动经其参考源或
+/// RCH 中转。切换前后按新旧源较高频率设置 FLASH 等待周期。
+#[cfg(sysctrl_ddl_v3_1)]
+pub fn init(config: &Config) {
+    l13x::init(config);
 }
 
-/// 软件延时不少于 10 ms（RM 3.2.3 Step7：XTH 稳定后需延时 10ms 以上）。
-///
-/// 以当前 HCLK 估算迭代次数；M0+ 上该循环单次迭代约 3 周期起，按 3
-/// 周期取下限保证时长不少于 10 ms。SDK 无此延时，差异见差异台账。
-#[cfg(sysctrl_ddl_v2_2)]
-fn delay_10ms() {
-    let n = (current_hclk_hz() / 300).max(1_000);
-    let mut i = 0u32;
-    while i < n {
-        i = i.wrapping_add(1);
-        core::hint::black_box(i);
-    }
-}
-
-/// 临时开启 GPIO 门控执行晶振引脚配置，结束后恢复原门控值（SDK
-/// `Clk_Enable` 同做法：保存 PERI_CLKEN → 置 GPIO 位 → 配引脚 → 恢复）。
-#[cfg(sysctrl_ddl_v2_2)]
-fn with_gpio_gate(f: impl FnOnce()) {
-    let saved = backend::read_peri_clken();
-    if !saved.gpio() {
-        enable_gpio();
-        f();
-        backend::write_peri_clken(saved);
-    } else {
-        f();
-    }
-}
-
-/// 直接写 RCH 出厂校准值（RCH_CR 不在解锁范围，RM 3.5.4）。
-#[cfg(sysctrl_ddl_v2_2)]
-fn write_rch_trim(freq: RchFreq) {
-    backend::modify_rch_cr(|w| w.set_trim(freq.trim_value()));
-}
-
-/// RM 3.2.7 方案 1：RCH 为当前系统时钟时逐级换频。
-///
-/// 先把 HCLK 分频提到 /128，按 4M ↔ 8M ↔ 16M ↔ 24M/22.12M 逐级写 TRIM，
-/// 分频在 [`init`] 末尾统一写回配置值。
-#[cfg(sysctrl_ddl_v2_2)]
-fn rch_step_to(target: RchFreq) {
-    backend::write_sysctrl0(|w| w.set_hclk_prs(HclkPrescaler::Div128 as u8));
-    let mut level = RchFreq::from_trim(backend::read_rch_cr().trim()).step_level();
-    let target_level = target.step_level();
-    while level != target_level {
-        level = if target_level > level {
-            level + 1
-        } else {
-            level - 1
-        };
-        // 中间档写对应校准值；顶档直接写目标值（22.12M 或 24M）。
-        let step = match level {
-            0 => RchFreq::Mhz4,
-            1 => RchFreq::Mhz8,
-            2 => RchFreq::Mhz16,
-            _ => target,
-        };
-        write_rch_trim(step);
-    }
-    write_rch_trim(target);
-}
-
-// ---------------------------------------------------------------------------
-// 初始化主流程（RM 3.2.1）
-// ---------------------------------------------------------------------------
-
-/// 按配置初始化时钟树。
+/// 按配置初始化 HC32L110 时钟树。
 ///
 /// 执行 RM 3.2.1 标准切换流程并写入频率快照（[`clocks`]）。可重复调
 /// 用（运行中重新配置），旧时钟源为 XTH 时其频率未知，FLASH 等待周期
@@ -1004,183 +1056,7 @@ fn rch_step_to(target: RchFreq) {
 /// 或该源等待稳定超时。
 #[cfg(sysctrl_ddl_v2_2)]
 pub fn init(config: &Config) {
-    let old = current_source();
-
-    // ---- RCH 频率（RM 3.2.6/3.2.7）----
-    if let Some(target) = config.rch {
-        let current = RchFreq::from_trim(backend::read_rch_cr().trim());
-        if current != target {
-            if old == Sysclk::Rch {
-                // RCH 正在驱动系统时钟：按 RM 3.2.7 方案 1 逐级换频。
-                rch_step_to(target);
-            } else {
-                // RCH 非当前源：直接改写（RM 3.2.6 Step1）。
-                write_rch_trim(target);
-            }
-        }
-    }
-
-    // ---- XTH（RM 3.2.3）----
-    if let Some(xth) = config.xth {
-        with_gpio_gate(|| crate::gpio::backend_setup_xth_pins(xth.bypass));
-        // XTH_CR 不在解锁范围（RM 3.2.3 Step2 先于 Step4 解锁）。
-        backend::modify_xth_cr(|w| {
-            w.set_driver((xth.freq_range.encode() << 2) | xth.driver.encode());
-            w.set_startup(xth.startup.encode());
-        });
-        if xth.bypass {
-            backend::write_sysctrl1(|w| w.set_exth_en(true));
-        }
-        // 使能并等稳定（Step4~Step7）。
-        backend::write_sysctrl0(|w| w.set_xth_en(true));
-        let deadline = wait_stable(WaitSource::Xth);
-        if !deadline {
-            panic!("clock: XTH 等待稳定超时");
-        }
-        // RM 3.2.3 Step7：稳定后软件延时 10ms 以上再切换。
-        delay_10ms();
-    }
-
-    // ---- RCL（RM 3.2.5 Step1~Step4）----
-    if let Some(rcl) = config.rcl {
-        backend::modify_rcl_cr(|w| {
-            w.set_trim(rcl.trim_value());
-            w.set_startup(RclStartup::Cycles256.encode());
-        });
-        backend::write_sysctrl0(|w| w.set_rcl_en(true));
-        if !wait_stable(WaitSource::Rcl) {
-            panic!("clock: RCL 等待稳定超时");
-        }
-    }
-
-    // ---- XTL（RM 3.2.2）----
-    if let Some(xtl) = config.xtl {
-        with_gpio_gate(|| crate::gpio::backend_setup_xtl_pins(xtl.bypass));
-        backend::modify_xtl_cr(|w| {
-            w.set_driver((xtl.amplitude.encode() << 2) | xtl.driver.encode());
-            w.set_startup(xtl.startup.encode());
-        });
-        if xtl.bypass {
-            backend::write_sysctrl1(|w| w.set_extl_en(true));
-        }
-        backend::write_sysctrl0(|w| w.set_xtl_en(true));
-        if !wait_stable(WaitSource::Xtl) {
-            panic!("clock: XTL 等待稳定超时");
-        }
-    }
-
-    // ---- 目标源频率 ----
-    // sys = Xtl 必须提供 XTL 配置（保证振荡器已按 RM 3.2.2 使能并稳定），
-    // 与 sys = Xth/Rcl 的守卫一致。
-    if config.sys == Sysclk::Xtl && config.xtl.is_none() {
-        panic!("clock: sys = Xtl 需要在 config.xtl 提供配置");
-    }
-    let sys_freq = match config.sys {
-        Sysclk::Rch => match config.rch {
-            Some(f) => f.frequency(),
-            None => RchFreq::from_trim(backend::read_rch_cr().trim()).frequency(),
-        },
-        Sysclk::Xth => {
-            config
-                .xth
-                .as_ref()
-                .expect("clock: sys = Xth 需要在 config.xth 提供配置")
-                .freq
-        }
-        Sysclk::Rcl => config
-            .rcl
-            .expect("clock: sys = Rcl 需要在 config.rcl 提供档位")
-            .frequency(),
-        Sysclk::Xtl => Hertz(32_768),
-    };
-
-    // ---- RCH 重新使能/稳定化（RM 3.2.6 Step3/Step4）----
-    // 再入场景：目标源为 RCH 且当前系统时钟不在 RCH 上。无条件"先清后置
-    // RCH_EN"重启振荡启动序列再等待 Stable：本次 init 可能刚直写过 TRIM
-    // （RM 3.1.1"特定的更改时序"），TRIM 更改后 STABLE 是否重新清零手册
-    // 未说明，重启使等待必然有效；RCH 未驱动系统时钟，清置窗口无手册禁
-    // 忌，启动仅 4us（RM 3.1.1）代价可忽略。
-    if config.sys == Sysclk::Rch && old != Sysclk::Rch {
-        backend::write_sysctrl0(|w| w.set_rch_en(false));
-        backend::write_sysctrl0(|w| w.set_rch_en(true));
-        // RM 3.2.6 Step4："查询等待 RCH_CR.Stable 标志变为 1"。
-        while !backend::read_rch_cr().stable() {}
-    }
-
-    // ---- FLASH 等待周期，前置（RM 3.2.1 Step4，按新旧源较高频率）----
-    // 旧源为 XTH 时晶振频率未知，按 32 MHz 保守处理。
-    let old_may_exceed_24m = match old {
-        Sysclk::Xth => true,
-        Sysclk::Rch | Sysclk::Rcl | Sysclk::Xtl => false,
-    };
-    if old_may_exceed_24m || sys_freq.0 > 24_000_000 {
-        backend::set_flash_wait(true);
-    }
-
-    // ---- 切换系统时钟源（RM 3.2.1 Step6）----
-    if config.sys != old {
-        backend::write_sysctrl0(|w| w.set_clk_sw4_sel(config.sys.encode()));
-    }
-
-    // ---- 分频（RM 3.5.1；RM 3.2.7 方案 1 的分频在此一并写回）----
-    backend::write_sysctrl0(|w| {
-        w.set_hclk_prs(config.hclk_pre as u8);
-        w.set_pclk_prs(config.pclk_pre as u8);
-    });
-
-    // ---- FLASH 等待周期，按新源频率复配（RM 3.2.1 Step7）----
-    backend::set_flash_wait(sys_freq.0 > 24_000_000);
-
-    // ---- 时钟故障检测（SYSCTRL1 位 4，SDK 定义 CLOCK_FT_EN）----
-    // RM 3.5.2 位 4 标记 Reserved（差异台账已登记）；仅在用户显式开启
-    // 时写 1，默认不触碰保留位。
-    if config.clock_fault_detect {
-        backend::write_sysctrl1(|w| w.set_clock_ft_en(true));
-    }
-
-    // ---- 关闭不再使用的旧源（RM 3.2.1 Step8）----
-    // 仅处理本函数知情的能力：复位后仅 RCH 使能；XTH/RCL/XTL 若为旧源
-    // 且未在配置中出现，说明是本函数之外的使能，不代为关闭。
-    if old == Sysclk::Rch && config.rch.is_none() && config.sys != Sysclk::Rch {
-        backend::write_sysctrl0(|w| w.set_rch_en(false));
-    }
-
-    // ---- 频率快照 ----
-    let hclk = sys_freq / config.hclk_pre;
-    let pclk = hclk / config.pclk_pre;
-    store_clocks(Clocks {
-        sys: sys_freq,
-        hclk,
-        pclk,
-    });
-}
-
-/// 振荡稳定等待（`*_CR.STABLE`，RM 3.5.4~3.5.7）。
-///
-/// 带简单超时上限（STABLE 长期为 0 时避免死循环），硬件正常时远在超时
-/// 前返回。手册未规定轮询超时值，上限按最长稳定时间的量级放宽取值。
-#[cfg(sysctrl_ddl_v2_2)]
-fn wait_stable(source: WaitSource) -> bool {
-    // 上限迭代数：按最慢时钟 XTL 2000ms 启动（DS 7.3.7）量级放宽。
-    let deadline = 20_000_000u32;
-    for _ in 0..deadline {
-        let stable = match source {
-            WaitSource::Xth => backend::read_xth_cr().stable(),
-            WaitSource::Rcl => backend::read_rcl_cr().stable(),
-            WaitSource::Xtl => backend::read_xtl_cr().stable(),
-        };
-        if stable {
-            return true;
-        }
-    }
-    false
-}
-
-#[cfg(sysctrl_ddl_v2_2)]
-enum WaitSource {
-    Xth,
-    Rcl,
-    Xtl,
+    l110::init(config);
 }
 
 // ---------------------------------------------------------------------------
@@ -1188,7 +1064,7 @@ enum WaitSource {
 // ---------------------------------------------------------------------------
 
 /// 深度休眠唤醒后是否强制使用 RCH（SYSCTRL0.WAKEUP_BYRCH，RM 3.5.1 位 15）。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub fn set_wakeup_by_rch(enable: bool) {
     backend::write_sysctrl0(|w| w.set_wakeup_byrch(enable));
 }
@@ -1196,33 +1072,45 @@ pub fn set_wakeup_by_rch(enable: bool) {
 /// XTL 高级使能（SYSCTRL1.XTL_ALWAYS_ON，RM 3.5.2 位 3）。
 ///
 /// 置 1 后 SYSCTRL0.XTL_EN 只可置位不可清零。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub fn set_xtl_always_on(enable: bool) {
+    #[cfg(sysctrl_ddl_v2_2)]
     backend::write_sysctrl1(|w| w.set_xtl_alwayson(enable));
+    #[cfg(sysctrl_ddl_v3_1)]
+    backend::write_sysctrl1(|w| w.set_xtl_always_on(enable));
 }
 
 /// RTC 低功耗模式（SYSCTRL1.RTC_LPW，RM 3.5.2 位 5）。
 ///
 /// 使能后 RTC 寄存器不可读写。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub fn set_rtc_lpw(enable: bool) {
     backend::write_sysctrl1(|w| w.set_rtc_lpw(enable));
 }
 
-/// RESET 引脚改作 GPIO（SYSCTRL1.RES_UIO，RM 3.5.2 位 7）。
+/// RESET 引脚改作 GPIO（SYSCTRL1.RES_UIO，仅 L110）。
 #[cfg(sysctrl_ddl_v2_2)]
 pub fn set_res_pin_gpio(enable: bool) {
     backend::write_sysctrl1(|w| w.set_res_uio(enable));
 }
 
-/// SWD 引脚改作 GPIO（SYSCTRL1.SWD_UIO，RM 3.5.2 位 8）。
-#[cfg(sysctrl_ddl_v2_2)]
+/// Cortex-M0+ LockUp 时复位 MCU（SYSCTRL1.LOCKUP_EN，仅 L13x）。
+#[cfg(sysctrl_ddl_v3_1)]
+pub fn set_lockup_reset(enable: bool) {
+    backend::write_sysctrl1(|w| w.set_lockup_en(enable));
+}
+
+/// SWD 引脚改作 GPIO（SYSCTRL1 位 8）。
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub fn set_swd_pin_gpio(enable: bool) {
+    #[cfg(sysctrl_ddl_v2_2)]
     backend::write_sysctrl1(|w| w.set_swd_uio(enable));
+    #[cfg(sysctrl_ddl_v3_1)]
+    backend::write_sysctrl1(|w| w.set_swd_use_io(enable));
 }
 
 /// RTC 高速补偿时钟选择（SYSCTRL1.RTC_FREQ_ADJUST，RM 3.5.2 位 11:9）。
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub fn set_rtc_adjust_clock(freq: RtcAdjustFreq) {
     backend::write_sysctrl1(|w| w.set_rtc_freq_adjust(freq.encode()));
 }
@@ -1262,8 +1150,8 @@ pub fn systick_calib() -> u32 {
 // HCLK/PCLK 波形输出（时钟分频例程的观测点）
 // ---------------------------------------------------------------------------
 
-/// 输出分频（GPIO CTRL1.HCLK_SEL/PCLK_SEL，RM 6.5.5.1 位 11:10/9:8）。
-#[cfg(sysctrl_ddl_v2_2)]
+/// 输出分频（GPIO CTRL1.HCLK_SEL/PCLK_SEL）。
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum OutputDiv {
     /// 不分频（编码 00）。
@@ -1276,7 +1164,7 @@ pub enum OutputDiv {
     Div8,
 }
 
-#[cfg(sysctrl_ddl_v2_2)]
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 impl OutputDiv {
     const fn encode(self) -> u8 {
         match self {
@@ -1320,4 +1208,28 @@ pub fn enable_pclk_output_p31(div: OutputDiv) {
 #[cfg(sysctrl_ddl_v2_2)]
 pub fn disable_pclk_output_p31() {
     crate::gpio::backend_disable_pclk_p31();
+}
+
+/// PA01 输出 HCLK 波形（PA01_SEL=6，GPIO CTRL1.HCLK_EN，仅 L13x）。
+#[cfg(sysctrl_ddl_v3_1)]
+pub fn enable_hclk_output_pa01(div: OutputDiv) {
+    crate::gpio::backend_enable_hclk_pa01(div.encode());
+}
+
+/// 停止 PA01 的 HCLK 输出（CTRL1.HCLK_EN = 0，仅 L13x）。
+#[cfg(sysctrl_ddl_v3_1)]
+pub fn disable_hclk_output_pa01() {
+    crate::gpio::backend_disable_hclk_pa01();
+}
+
+/// PA02 输出 PCLK 波形（PA02_SEL=6，GPIO CTRL1.PCLK_EN，仅 L13x）。
+#[cfg(sysctrl_ddl_v3_1)]
+pub fn enable_pclk_output_pa02(div: OutputDiv) {
+    crate::gpio::backend_enable_pclk_pa02(div.encode());
+}
+
+/// 停止 PA02 的 PCLK 输出（CTRL1.PCLK_EN = 0，仅 L13x）。
+#[cfg(sysctrl_ddl_v3_1)]
+pub fn disable_pclk_output_pa02() {
+    crate::gpio::backend_disable_pclk_pa02();
 }

@@ -55,6 +55,14 @@ pub(crate) use gpio_v2::pull_up_unbonded as backend_pull_up_unbonded;
 mod gpio_v3_3;
 #[cfg(gpio_ddl_v3_3)]
 use gpio_v3_3 as backend;
+#[cfg(gpio_ddl_v3_3)]
+pub(crate) use gpio_v3_3::{
+    disable_hclk_output_pa01 as backend_disable_hclk_pa01,
+    disable_pclk_output_pa02 as backend_disable_pclk_pa02,
+    enable_hclk_output_pa01 as backend_enable_hclk_pa01,
+    enable_pclk_output_pa02 as backend_enable_pclk_pa02, setup_xth_pins as backend_setup_xth_pins,
+    setup_xtl_pins as backend_setup_xtl_pins,
+};
 // HC32L13x 各封装未引出脚处理（SDK `_HidePinInit` 同源），仅由带
 // hc32l13x-*pin 封装 feature 的料号编译，[`crate::init`] 调用。
 #[cfg(all(gpio_ddl_v3_3, feature = "hc32l13x"))]
@@ -64,6 +72,8 @@ pub(crate) use gpio_v3_3::pull_up_unbonded as backend_pull_up_unbonded;
 mod gpio_v3_1;
 #[cfg(gpio_ddl_v3_1)]
 use gpio_v3_1 as backend;
+#[cfg(gpio_ddl_v3_1)]
+pub(crate) use gpio_v3_1::setup_xth_pins as backend_setup_xth_pins;
 
 use core::convert::Infallible;
 use core::marker::PhantomData;

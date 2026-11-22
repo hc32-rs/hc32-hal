@@ -381,3 +381,15 @@ pub(crate) fn read_in(n: PinId) -> bool {
         _ => unreachable!("GPIO v3_1 后端无此位号"),
     }
 }
+
+/// XTH 晶振使用 PD00/PD01 模拟输入；旁路模式仅 PD00 为数字输入，
+/// PD01 按 RM 3.5.4 保持模拟态且不得用作 GPIO。
+pub(crate) fn setup_xth_pins(bypass: bool) {
+    let xthi = PinId::new(3, 0);
+    let xtho = PinId::new(3, 1);
+    set_sel(xthi, 0);
+    set_ads(xthi, !bypass);
+    set_dir(xthi, true);
+    set_ads(xtho, true);
+    set_dir(xtho, true);
+}

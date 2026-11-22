@@ -15,8 +15,8 @@
 | 系列 | 文件 | 条目数 |
 | --- | --- | --- |
 | HC32L110 | [hc32l110.md](sdk-doc-discrepancies/hc32l110.md) | 25 |
-| HC32L13x | [hc32l13x.md](sdk-doc-discrepancies/hc32l13x.md) | 3 |
-| HC32F420 | [hc32f420.md](sdk-doc-discrepancies/hc32f420.md) | 2 |
+| HC32L13x | [hc32l13x.md](sdk-doc-discrepancies/hc32l13x.md) | 7 |
+| HC32F420 | [hc32f420.md](sdk-doc-discrepancies/hc32f420.md) | 4 |
 
 ## HC32L110
 
@@ -51,8 +51,14 @@
 - GPIO · SDK _HidePinInit 行内注释与掩码不符
 - SYSCTRL · RCH 为当前时钟源时直写 TRIM 的时序手册未说明
 - SYSCTRL · SDK SystemInit 不等待 RCH STABLE
+- SYSCTRL · SDK RCH 换频接口未执行手册逐级序列
+- SYSCTRL · XTH 晶振频率下限 DS 与 RM 不一致
+- SYSCTRL · SDK 晶振默认驱动档与手册推荐值不符
+- SYSCTRL · SDK PLL 例程在 48 MHz 设置 2 个 FLASH 等待周期
 
 ## HC32F420
 
 - SYSCTRL · SystemInit 整字写 RCHTRIM/RCLTRIM 覆盖保留位
 - GPIO · RM 自身 GPIO_PUPD 复位值两处不一致
+- SYSCTRL · SDK 要求 PLL 启动前额外开启 ADC0 BGR
+- FLASH · DS 的 24 MHz 测试条件与 RM 等待周期边界不同

@@ -68,13 +68,10 @@ const GPIO_DRIVER_BACKENDS: &[(&[&str], (&str, &str), &[(&str, &str)])] = &[
 /// 组合依赖是驱动除自身寄存器外还需要的后端 cfg。按当前驱动代码核实：
 /// - SYSCTRL（clock）ddl_v2_2：晶振引脚模拟模式经 GPIO 寄存器（L110
 ///   RM 3.1），FLASH 等待周期经 FLASH 寄存器（RM 3.2.1）；
-/// - SYSCTRL ddl_v3_1（HC32L13x）：当前只实现默认初始化（装载出厂
-///   TRIM）与 GPIO 门控，不触碰晶振引脚与 FLASH 寄存器，仅依赖 GPIO
-///   （未引出脚上拉）；可配置时钟树接入后再按 L13x RM 3.2 补依赖；
-/// - SYSCTRL ddl_v4（HC32F420）：默认路径只装载 RCH/RCL 出厂 TRIM、
-///   按端口开关 GPIO 的 AHB1 门控（复位默认 RCHCLKD 4 MHz ≤ 24 MHz，
-///   不触碰 FLASH_WAIT 与晶振引脚），无组合依赖；可配置时钟树接入后
-///   再按 F420 RM 3.2 补依赖；
+/// - SYSCTRL ddl_v3_1（HC32L13x）：晶振引脚经 GPIO，FLASH_CR.WAIT 经
+///   FLASH，PLL 启动依赖 BGR（与 ADC 共用 PERI_CLKEN.ADC 门控）；
+/// - SYSCTRL ddl_v4（HC32F420）：晶振引脚经 GPIOD、FLASH_WAIT 经
+///   FLASH，PLL 启动按 SDK 例程依赖 ADC0 的 BGR；
 /// - BT/ADT/LPTIM/PCA：输出门控选择直接写 GPIO CTRLx（RM 9/11/12/13），
 ///   时钟门控与频率经 SYSCTRL；
 /// - UART/LPUART：波特率定时器占用 BT（RM 15.1/16.1）、引脚复用经
@@ -85,8 +82,14 @@ const GPIO_DRIVER_BACKENDS: &[(&[&str], (&str, &str), &[(&str, &str)])] = &[
 /// GPIO 不在本表：按实例核对（[`GPIO_DRIVER_BACKENDS`]）。
 const DRIVER_BACKENDS: &[((&str, &str), &[&str])] = &[
     (("sysctrl", "ddl_v2_2"), &["gpio_ddl_v2", "flash_ddl_v3"]),
-    (("sysctrl", "ddl_v3_1"), &["gpio_ddl_v3_3"]),
-    (("sysctrl", "ddl_v4"), &[]),
+    (
+        ("sysctrl", "ddl_v3_1"),
+        &["gpio_ddl_v3_3", "flash_ddl_v3_2", "bgr_ddl_v1_1"],
+    ),
+    (
+        ("sysctrl", "ddl_v4"),
+        &["gpio_ddl_v3_1", "flash_ddl_v2", "adc_ddl_v3"],
+    ),
     (("bt", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
     (("adt", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
     (("lptim", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
@@ -131,6 +134,8 @@ fn main() {
         "peri_clock",
         "peri_flash",
         "peri_sysctrl",
+        "peri_bgr",
+        "peri_adc0",
         "peri_bt0",
         "peri_bt1",
         "peri_bt2",

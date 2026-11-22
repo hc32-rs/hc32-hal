@@ -21,7 +21,7 @@ const HCLK: Hertz = Hertz::mhz(4);
 
 #[entry]
 fn main() -> ! {
-    // HC32L13x 只接入默认时钟路径：RCH 4 MHz，HCLK = PCLK = 4 MHz。
+    // 本例程不显式配置时钟树，走默认路径：RCH 4 MHz，HCLK = PCLK = 4 MHz。
     let p = hc32_ddl_hal::init(Config::default());
     debug_assert_eq!(clock::clocks().hclk, HCLK);
 

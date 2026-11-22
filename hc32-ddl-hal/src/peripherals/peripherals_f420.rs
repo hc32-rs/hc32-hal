@@ -13,7 +13,7 @@
 //! 其余 F420 封装（FAUB QFN32、JAUB/JATB 48 脚）引脚子集不同，逐个
 //! 核对引脚表后再接入。
 //!
-//! 当前 F420 只适配了 GPIO（`gpio/ddl_v3_1`）与 SYSCTRL 默认时钟
+//! 当前 F420 适配了 GPIO（`gpio/ddl_v3_1`）与 SYSCTRL 可配置时钟树
 //! （`sysctrl/ddl_v4`）；USART/GTIM 等实例的驱动后端未适配，`Peripherals`
 //! 暂无外设字段，驱动逐个接入后按实例 cfg 增加。
 //!
