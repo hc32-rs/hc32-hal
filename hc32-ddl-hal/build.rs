@@ -70,7 +70,7 @@ fn main() {
         let cfg = format!("{kind}_{version}");
         println!("cargo:rustc-check-cfg=cfg({cfg})");
     }
-    // 驱动源码引用的实例 cfg 固定为 L110 的实例名；L130 的 SYSCTRL
+    // 驱动源码引用的实例 cfg 固定为 L110 的实例名；L13x 的 SYSCTRL
     // 实例名一并列出（select_drivers 覆盖元数据中的全部实例）。
     for instance in [
         "peri_gpio",
@@ -97,17 +97,18 @@ fn main() {
 
     // 与 metapac 构建脚本同源判断：HAL 料号 feature 以 CARGO_FEATURE_HC32
     // 开头。内部家族/封装 feature（hc32l110、hc32l110-full-pins、
-    // hc32l130-48pin 等）在 metapac 无同名芯片 feature，只选它们等于不选
-    // 料号，需精确排除（不能按前缀排除：hc32l110b4pa 等真料号同样以
-    // hc32l110/hc32l130 开头）。
+    // hc32l13x-48pin 等）在 metapac 无同名芯片 feature，只选它们等于不选
+    // 料号，需精确排除（不能按前缀排除：hc32l110b4pa、hc32l136k8ta 等
+    // 真料号同样以 hc32l110/hc32l13x 开头）。
     const INTERNAL_FEATURES: &[&str] = &[
         "CARGO_FEATURE_HC32L110",
         "CARGO_FEATURE_HC32L110_16PIN",
         "CARGO_FEATURE_HC32L110_FULL_PINS",
-        "CARGO_FEATURE_HC32L130",
-        "CARGO_FEATURE_HC32L130_28PIN",
-        "CARGO_FEATURE_HC32L130_32PIN",
-        "CARGO_FEATURE_HC32L130_48PIN",
+        "CARGO_FEATURE_HC32L13X",
+        "CARGO_FEATURE_HC32L13X_28PIN",
+        "CARGO_FEATURE_HC32L13X_32PIN",
+        "CARGO_FEATURE_HC32L13X_48PIN",
+        "CARGO_FEATURE_HC32L13X_64PIN",
     ];
     let mut chip_features = env::vars().map(|(name, _)| name).filter(|name| {
         name.starts_with("CARGO_FEATURE_HC32") && !INTERNAL_FEATURES.contains(&name.as_str())

@@ -12,7 +12,7 @@
 //! );
 //! ```
 //!
-//! 启用恰好一个芯片 feature（如 `hc32l110c6ua`、`hc32l130j8ta`）选择
+//! 启用恰好一个芯片 feature（如 `hc32l110c6ua`、`hc32l136k8ta`）选择
 //! 目标型号。构建期由 build.rs 从该料号的 PAC 元数据读取外设实例的
 //! `registers.kind` 与 `registers.version`，派生后端 cfg（如
 //! `gpio_ddl_v2`、`sysctrl_ddl_v2_2`）与实例 cfg（`peri_uart0` 等），
@@ -44,7 +44,7 @@ pub use hc32_metapac as pac;
 // DRIVER_BACKENDS 核对后才会发出对应后端 cfg。
 // - L110：sysctrl 驱动写晶振引脚（GPIO）与 FLASH 等待周期（FLASH），
 //   三个实例 cfg 都在；
-// - L130：FLASH 布局为 ddl_v3_2（未适配驱动），sysctrl 驱动不触碰
+// - L13x：FLASH 布局为 ddl_v3_2（未适配驱动），sysctrl 驱动不触碰
 //   FLASH 寄存器，后端依赖表相应只要求 GPIO。
 #[cfg(all(sysctrl_ddl_v2_2, peri_clock, peri_flash, peri_gpio))]
 pub mod clock;
@@ -114,14 +114,14 @@ mod peripheral;
 // 表），随家族 feature 门控；迁入元数据后按封装派生。
 #[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
 pub mod peripherals;
-#[cfg(all(feature = "hc32l130", feature = "_chip-selected"))]
+#[cfg(all(feature = "hc32l13x", feature = "_chip-selected"))]
 pub mod peripherals;
 mod time;
 pub use time::Hertz;
 
 #[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
 use peripherals::Peripherals;
-#[cfg(all(feature = "hc32l130", feature = "_chip-selected"))]
+#[cfg(all(feature = "hc32l13x", feature = "_chip-selected"))]
 use peripherals::Peripherals;
 
 /// 初始化配置。
@@ -147,34 +147,37 @@ pub struct Config {}
 
 /// 初始化 HAL，一次性发放全部外设单例。
 ///
-/// HC32L110：配置了 [`Config::clock`] 时先执行时钟树初始化（RM 3.2.1
-/// 标准切换流程），再发放外设。无论是否配置时钟，均按数据手册要求为
+/// 先在临界区内领取外设单例（第二次调用在改动任何硬件前 panic），成功
+/// 后执行：HC32L110 配置了 [`Config::clock`] 时进行时钟树初始化
+/// （RM 3.2.1 标准切换流程）；无论是否配置时钟，均按数据手册要求为
 /// 16 引脚封装未引出的 P03/P32/P33/P34 使能上拉（方向寄存器复位值已
 /// 为输入）。
 #[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
 pub fn init(config: Config) -> Peripherals {
+    let peripherals = Peripherals::take();
     if let Some(clock) = &config.clock {
         clock::init(clock);
     }
     init_pins();
-    Peripherals::take()
+    peripherals
 }
 
 /// 初始化 HAL（HC32L13x 默认路径），一次性发放全部外设单例。
 ///
+/// 先在临界区内领取外设单例（第二次调用在改动任何硬件前 panic），随后
 /// 依次执行（对齐厂商 `SystemInit`，Rust 启动路径不运行厂商代码）：
 ///
 /// 1. 装载 RCH/RCL 出厂校准 TRIM（[`clock::init_default`]）；
 /// 2. 按当前料号封装处理未引出脚（数字输入 + 上拉，SDK `_HidePinInit`
-///    同源；DS 3.1 表下注与 RM 6.3）；
-/// 3. 发放外设单例。
+///    同源；DS 3.1 表下注与 RM 6.3）。
 ///
 /// 系统时钟保持复位默认：RCH 4 MHz，HCLK = PCLK = 4 MHz。
-#[cfg(all(feature = "hc32l130", feature = "_chip-selected"))]
+#[cfg(all(feature = "hc32l13x", feature = "_chip-selected"))]
 pub fn init(_config: Config) -> Peripherals {
+    let peripherals = Peripherals::take();
     clock::init_default();
     init_pins();
-    Peripherals::take()
+    peripherals
 }
 
 /// 封装相关的引脚默认处理（HC32L110 手写引脚表）。
@@ -195,10 +198,11 @@ fn init_pins() {
 
 /// 封装相关的引脚默认处理（HC32L13x，SDK `_HidePinInit` 同源）。
 ///
-/// 各封装均有未引出 IO（见 `peripherals` 模块文档的封装差异表），
-/// 按 `hc32l130-<引脚数>pin` 封装 feature 选择掩码；处理期间临时打开
-/// GPIO 门控、结束后恢复原值（SDK `_HidePinInit` 保存/恢复同做法）。
-#[cfg(all(feature = "hc32l130", feature = "_chip-selected"))]
+/// 除 64 引脚封装（K8TA，全部 IO 引出）外，各封装均有未引出 IO（见
+/// `peripherals` 模块文档的封装差异表），按 `hc32l13x-<引脚数>pin`
+/// 封装 feature 选择掩码；处理期间临时打开 GPIO 门控、结束后恢复原值
+/// （SDK `_HidePinInit` 保存/恢复同做法）。
+#[cfg(all(feature = "hc32l13x", feature = "_chip-selected"))]
 fn init_pins() {
     // SDK `_HidePinInit`：保存 PERI_CLKEN → 置 GPIO 位 → 配未引出脚 →
     // 整写恢复。GPIO 门控复位为关（RM 3.5.9 复位值 0x8080_0000）。

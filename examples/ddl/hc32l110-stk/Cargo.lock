@@ -99,6 +99,7 @@ dependencies = [
 name = "hc32-ddl-hal"
 version = "0.1.0"
 dependencies = [
+ "cortex-m",
  "embedded-hal 1.0.0",
  "embedded-hal-nb",
  "hc32-metapac",

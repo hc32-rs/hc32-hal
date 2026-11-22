@@ -21,8 +21,6 @@
 // 引脚单例沿用手册引脚名（P14 等）。
 #![allow(non_snake_case)]
 
-use core::sync::atomic::{AtomicBool, Ordering};
-
 use crate::peripheral::{Peri, PeripheralType};
 
 /// 生成 HC32L110 的引脚单例与外设集合。
@@ -201,19 +199,15 @@ l110_peripherals! {
 
 /// P00/RESETB 为复位输入，方向与上拉等控制位保留，暂不作为 GPIO 暴露。
 
-static TAKEN: AtomicBool = AtomicBool::new(false);
-
 impl Peripherals {
     /// 以安全方式取得全部单例，第二次调用 panic。
     ///
-    /// Cortex-M0+ 没有原子读-改-写指令，用 load+store 检查；[`crate::init`]
-    /// 属于启动期代码，不与中断并发，该检查足以防止重复初始化。
+    /// 独占检查与占用经 [`super::claim_peripherals`] 在 PRIMASK 临界区
+    /// 内完成；[`crate::init`] 在改动任何硬件前先领取，重复初始化不会
+    /// 先触碰外设。
     pub(crate) fn take() -> Self {
-        if TAKEN.load(Ordering::Relaxed) {
-            panic!("hc32-ddl-hal: peripherals already taken");
-        }
-        TAKEN.store(true, Ordering::Relaxed);
-        // safety: TAKEN 保证这是唯一一次构造。
+        super::claim_peripherals();
+        // safety: claim_peripherals 保证这是唯一一次构造。
         unsafe { Self::steal() }
     }
 }

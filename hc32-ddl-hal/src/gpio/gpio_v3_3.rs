@@ -763,12 +763,13 @@ pub(crate) fn set_sel(n: PinId, func: u8) {
 /// 掩码与 SDK 逐封装核对（SDK 行内注释"PC00~PC12""PD02/04/06"与掩码
 /// 0x3FFF/0x00F4 不符处以掩码为准，掩码与 DS 表 3-2 一致）。
 ///
-/// 门控已由调用方（[`crate::init`]）打开并恢复。各料号经 `hc32l130-*pin`
-/// 封装 feature 调用对应分支。
-#[cfg(feature = "hc32l130")]
+/// 门控已由调用方（[`crate::init`]）打开并恢复。各料号经 `hc32l13x-*pin`
+/// 封装 feature 调用对应分支；64 引脚封装（K8TA）全部 IO 引出，SDK
+/// `_HidePinInit` 的 64PIN 分支为空，三个分支均不编译。
+#[cfg(feature = "hc32l13x")]
 pub(crate) fn pull_up_unbonded() {
     // 掩码以 (寄存器位值) 表达：下述三组各封装互斥（feature 保证）。
-    #[cfg(feature = "hc32l130-28pin")]
+    #[cfg(feature = "hc32l13x-28pin")]
     {
         // 28 脚（E8PA TSSOP28）：PA15、PB03~PB15、PC00~PC13、
         // PD02/PD04~PD07 未引出（DS 表 3-2 28 列空白处）。
@@ -851,7 +852,7 @@ pub(crate) fn pull_up_unbonded() {
             w.set_pd07(true);
         });
     }
-    #[cfg(feature = "hc32l130-32pin")]
+    #[cfg(feature = "hc32l13x-32pin")]
     {
         // 32 脚（F8UA QFN32）：PA00/PA01/PA03、
         // PB02/PB08/PB09/PB10/PB12~PB15、PC00~PC13、PD02/PD04~PD07 未引出。
@@ -932,10 +933,10 @@ pub(crate) fn pull_up_unbonded() {
             w.set_pd07(true);
         });
     }
-    #[cfg(feature = "hc32l130-48pin")]
+    #[cfg(feature = "hc32l13x-48pin")]
     {
-        // 48 脚（J8TA LQFP48 / J8UA QFN48）：PC00~PC12、
-        // PD02/PD04/PD05 未引出。
+        // 48 脚（L130 J8TA LQFP48 / J8UA QFN48、L136 J8TA LQFP48）：
+        // PC00~PC12、PD02/PD04/PD05 未引出。
         pac::GPIO.pcads().modify(|w| {
             w.set_pc00(false);
             w.set_pc01(false);
