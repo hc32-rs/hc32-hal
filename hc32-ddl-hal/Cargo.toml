@@ -51,6 +51,14 @@ hc32l130j8ua = ["dep:hc32-metapac", "hc32-metapac/hc32l130j8ua", "hc32l13x", "hc
 hc32l136j8ta = ["dep:hc32-metapac", "hc32-metapac/hc32l136j8ta", "hc32l13x", "hc32l13x-48pin", "_chip-selected"]
 hc32l136k8ta = ["dep:hc32-metapac", "hc32-metapac/hc32l136k8ta", "hc32l13x", "hc32l13x-64pin", "_chip-selected"]
 
+# HC32F420（Cortex-M4，__FPU_PRESENT = 0，目标 thumbv7em-none-eabi；
+# GPIOA~GPIOD = gpio/ddl_v3_1（每端口独立实例、独立 AHB1 门控位），
+# SYSCTRL = sysctrl/ddl_v4，GPIOAUX = gpioaux/ddl_v1_2 且不为本驱动所
+# 依赖）。KATB LQFP64 引出全部 52 个 IO（PA00~PA15、PB00~PB15、
+# PC00~PC15、PD00~PD03，DS Rev1.20 表 4-1），无未引出脚处理；其余
+# F420 封装引脚子集不同，待逐个核对引脚表后再接入。
+hc32f420katb = ["dep:hc32-metapac", "hc32-metapac/hc32f420katb", "hc32f420", "_chip-selected"]
+
 # 内部标记：任一公开料号 feature 都带出。dep: 语法不注册裸
 # hc32-metapac feature，src 与 build.rs 以此 cfg 判断“已选料号”。
 _chip-selected = []
@@ -80,3 +88,7 @@ hc32l13x-48pin = []
 # 64 引脚封装（L136 K8TA LQFP64）：全部 56 个 IO（PA00~PA15、
 # PB00~PB15、PC00~PC15、PD00~PD07）引出，无未引出脚。
 hc32l13x-64pin = []
+
+# 内部派生 feature：HC32F420 手写引脚表的适用范围，同上不要单独启用。
+# 引脚名沿用手册 PA00 等写法，单例按 (端口, 位号) 派生。
+hc32f420 = []

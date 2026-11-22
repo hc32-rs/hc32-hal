@@ -12,17 +12,18 @@
 //! );
 //! ```
 //!
-//! 启用恰好一个芯片 feature（如 `hc32l110c6ua`、`hc32l136k8ta`）选择
-//! 目标型号。构建期由 build.rs 从该料号的 PAC 元数据读取外设实例的
-//! `registers.kind` 与 `registers.version`，派生后端 cfg（如
-//! `gpio_ddl_v2`、`sysctrl_ddl_v2_2`）与实例 cfg（`peri_uart0` 等），
+//! 启用恰好一个芯片 feature（如 `hc32l110c6ua`、`hc32l136k8ta`、
+//! `hc32f420katb`）选择目标型号。构建期由 build.rs 从该料号的 PAC 元数据
+//! 读取外设实例的 `registers.kind` 与 `registers.version`，派生后端 cfg
+//! （如 `gpio_ddl_v2`、`sysctrl_ddl_v2_2`）与实例 cfg（`peri_uart0` 等），
 //! 据此开放驱动模块与 [`Peripherals`] 字段。应用只选完整料号，不感知
 //! IP 后端。
 //!
 //! 时钟能力按型号开放：HC32L110 的 [`Config::clock`] 可配置时钟树
 //! （RCH 档位/晶振/分频，不配置时保持复位默认 RCH 4 MHz）；HC32L13x
-//! 当前只接入默认路径（`init` 内装载 RCH/RCL 出厂 TRIM，系统时钟保持
-//! 复位默认 RCH 4 MHz，HCLK = PCLK = 4 MHz）。
+//! 与 HC32F420 当前只接入默认路径（`init` 内装载 RCH/RCL 出厂 TRIM，
+//! 系统时钟保持复位默认 4 MHz——L13x 为 RCH 4 MHz、F420 为 RCHCLKD
+//! 4 MHz（RCH 24 MHz 经 RCHCR.DIV 分频））。
 
 #![no_std]
 // 零料号：所有驱动模块都被 cfg 关闭，死代码警告无意义。
@@ -50,9 +51,25 @@ pub use hc32_metapac as pac;
 pub mod clock;
 #[cfg(all(sysctrl_ddl_v3_1, peri_sysctrl, peri_gpio))]
 pub mod clock;
+// F420：sysctrl_v4 默认路径只装载 TRIM 与 GPIO 门控，不触碰 GPIO/FLASH
+// 寄存器，无组合实例要求。
+#[cfg(all(sysctrl_ddl_v4, peri_sysctrl))]
+pub mod clock;
 #[cfg(all(gpio_ddl_v2, sysctrl_ddl_v2_2, peri_gpio))]
 pub mod gpio;
 #[cfg(all(gpio_ddl_v3_3, sysctrl_ddl_v3_1, peri_gpio))]
+pub mod gpio;
+// F420：gpio_ddl_v3_1 的发放已按实例核对 GPIOA~GPIOD 集合（build.rs
+// 的 GPIO_DRIVER_BACKENDS）；门控经 sysctrl_ddl_v4。
+#[cfg(all(
+    gpio_ddl_v3_1,
+    sysctrl_ddl_v4,
+    peri_sysctrl,
+    peri_gpioa,
+    peri_gpiob,
+    peri_gpioc,
+    peri_gpiod
+))]
 pub mod gpio;
 
 // 以下驱动还含 HC32L110 手写的实例单例与引脚复用表（PAC 元数据暂缺
@@ -116,12 +133,16 @@ mod peripheral;
 pub mod peripherals;
 #[cfg(all(feature = "hc32l13x", feature = "_chip-selected"))]
 pub mod peripherals;
+#[cfg(all(feature = "hc32f420", feature = "_chip-selected"))]
+pub mod peripherals;
 mod time;
 pub use time::Hertz;
 
 #[cfg(all(feature = "hc32l110", feature = "_chip-selected"))]
 use peripherals::Peripherals;
 #[cfg(all(feature = "hc32l13x", feature = "_chip-selected"))]
+use peripherals::Peripherals;
+#[cfg(all(feature = "hc32f420", feature = "_chip-selected"))]
 use peripherals::Peripherals;
 
 /// 初始化配置。
@@ -143,6 +164,14 @@ pub struct Config {
 /// 用空配置初始化即可，后续接入后在本类型上增加同名字段保持入口稳定。
 #[derive(Default)]
 #[cfg(all(sysctrl_ddl_v3_1, feature = "_chip-selected"))]
+pub struct Config {}
+
+/// HC32F420 的初始化配置：仅默认时钟路径，无字段。
+///
+/// 同 L13x：可配置时钟树（RM 3.2 的 4 源切换、PLL）尚未接入，应用用
+/// 空配置初始化，接入后在本类型上增加同名字段保持入口稳定。
+#[derive(Default)]
+#[cfg(all(sysctrl_ddl_v4, feature = "_chip-selected"))]
 pub struct Config {}
 
 /// 初始化 HAL，一次性发放全部外设单例。
@@ -210,4 +239,23 @@ fn init_pins() {
     clock::enable_gpio();
     gpio::backend_pull_up_unbonded();
     clock::sysctrl_v3_1::write_peri_clken(saved);
+}
+
+/// 初始化 HAL（HC32F420 默认路径），一次性发放全部外设单例。
+///
+/// 先在临界区内领取外设单例（第二次调用在改动任何硬件前 panic），随后
+/// 装载 RCH/RCL 出厂校准 TRIM（[`clock::init_default`]，对齐厂商
+/// `SystemInit`；Rust 启动路径不运行厂商代码）。
+///
+/// 系统时钟保持复位默认：RCH 24 MHz 本振 6 分频（RCHCR 复位值 0x2，
+/// DIV 编码 0010 = /6，RM 3.1.2/3.5.6）得 RCHCLKD 4 MHz，
+/// HCLK = PCLK0 = PCLK1 = 4 MHz
+/// （SYSCTRL_CR0 复位值 0x0000_0000）。LQFP64 封装引出全部 52 个 IO，
+/// 无未引出脚处理：复位后各端口默认为模拟输入（RM 6.3.3），使用前由
+/// 各 GPIO 驱动按需配置；门控在构造引脚时按端口打开。
+#[cfg(all(feature = "hc32f420", feature = "_chip-selected"))]
+pub fn init(_config: Config) -> Peripherals {
+    let peripherals = Peripherals::take();
+    clock::init_default();
+    peripherals
 }

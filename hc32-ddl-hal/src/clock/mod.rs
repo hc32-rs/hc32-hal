@@ -28,22 +28,37 @@
 //! 型号 API 相应收窄（AGENTS.md「仅接入默认时钟的型号只开放已实现的
 //! 时钟能力」）。
 //!
+//! HC32F420（`sysctrl_ddl_v4`）同样只接入默认时钟路径：复位默认系统
+//! 时钟为 RCHCLKD 4 MHz（RCH 24 MHz 本振 6 分频：RCHCR 复位值 0x2，
+//! DIV 编码 0010 = /6，RM 3.1.2/3.5.6），HCLK = PCLK0 = PCLK1 = 4 MHz；
+//! [`init_default`] 装载 RCH/RCL
+//! 出厂 TRIM，GPIO 门控按端口走 SYSCTRL_AHBEN1 位 0~3（RM 3.5.16）。
+//! 可配置时钟树（RM 3.2 的 4 源切换、PLL）未接入。
+//!
 //! [`sysctrl_v2_2`]: self::sysctrl_v2_2
 //! [`sysctrl_v3_1`]: self::sysctrl_v3_1
+//! [`sysctrl_v4`]: self::sysctrl_v4
 
 #[cfg(sysctrl_ddl_v2_2)]
 pub(crate) mod sysctrl_v2_2;
 #[cfg(sysctrl_ddl_v2_2)]
 use sysctrl_v2_2 as backend;
 #[cfg(sysctrl_ddl_v2_2)]
-use sysctrl_v2_2::DEFAULT_RCH_HZ as BACKEND_RCH_HZ;
+use sysctrl_v2_2::DEFAULT_RCH_HZ as BACKEND_SYS_HZ;
 
 #[cfg(sysctrl_ddl_v3_1)]
 pub(crate) mod sysctrl_v3_1;
 #[cfg(sysctrl_ddl_v3_1)]
 use sysctrl_v3_1 as backend;
 #[cfg(sysctrl_ddl_v3_1)]
-use sysctrl_v3_1::DEFAULT_RCH_HZ as BACKEND_RCH_HZ;
+use sysctrl_v3_1::DEFAULT_RCH_HZ as BACKEND_SYS_HZ;
+
+#[cfg(sysctrl_ddl_v4)]
+pub(crate) mod sysctrl_v4;
+#[cfg(sysctrl_ddl_v4)]
+use sysctrl_v4 as backend;
+#[cfg(sysctrl_ddl_v4)]
+use sysctrl_v4::DEFAULT_SYSCLK_HZ as BACKEND_SYS_HZ;
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -659,12 +674,13 @@ pub enum PeripheralGate {
     Flash,
 }
 
-/// 开启 GPIO 外设时钟门控，幂等。
+/// 开启 GPIO 外设时钟门控，幂等（单外设多端口布局）。
 ///
 /// GPIO 初始化路径（[`crate::init`] 与各 GPIO/复用构造入口）统一经由
 /// 当前型号的系统控制器打开门控。读取-修改-写回非原子：若中断处理器
 /// 也会开关 GPIO 门控，需调用方自行用临界区保护。驱动构造路径只在启动
 /// 阶段执行，通常无需额外保护。
+#[cfg(any(sysctrl_ddl_v2_2, sysctrl_ddl_v3_1))]
 pub(crate) fn enable_gpio() {
     #[cfg(sysctrl_ddl_v2_2)]
     enable_peripheral(PeripheralGate::Gpio, true);
@@ -672,6 +688,16 @@ pub(crate) fn enable_gpio() {
     // 门控 API 待驱动接入时再开放，GPIO 位直接经后端置位。
     #[cfg(sysctrl_ddl_v3_1)]
     backend::modify_peri_clken(|w| w.set_gpio(true));
+}
+
+/// 开启 `port` 端口 GPIO 实例的时钟门控，幂等（按端口独立门控布局）。
+///
+/// GPIO 后端把 PinId.port 转发到这里：AHB1EN 位 0~3 = GPIOA~GPIOD
+/// （RM 3.5.16），复位为关，门控关闭时对该端口寄存器的访问不生效。
+/// 读-改-写非原子，注意事项同 [`enable_gpio`]。
+#[cfg(sysctrl_ddl_v4)]
+pub(crate) fn enable_gpio(port: u8) {
+    backend::enable_gpio(port);
 }
 
 /// 设置外设时钟门控。
@@ -734,21 +760,25 @@ pub fn is_peripheral_enabled(gate: PeripheralGate) -> bool {
 /// 初始化后的时钟树频率快照。
 ///
 /// 由 [`init`] 写入，其他驱动经 [`clocks`] 读取（例如 UART 的波特率
-/// 计算取 `pclk`）。
+/// 计算取 `pclk`）。HC32F420 有两根 APB 总线：`pclk` 记 PCLK0（APB0），
+/// PCLK1（APB1）经 [`pclk1`] 单独查询。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Clocks {
     /// 系统时钟（切换后的源频率）。
     pub sys: Hertz,
     /// AHB 总线时钟：`sys / hclk_pre`。
     pub hclk: Hertz,
-    /// APB 总线时钟：`hclk / pclk_pre`。
+    /// APB 总线时钟：`hclk / pclk_pre`（F420 为 PCLK0）。
     pub pclk: Hertz,
 }
 
 impl Default for Clocks {
     fn default() -> Self {
-        // 复位态：RCH 4 MHz，HCLK = PCLK = 4 MHz（HC32L110/L13x 一致，
-        // 各自 RM 3.5.1 SYSCTRL0 复位值 0x0000_0001：默认源 RCH、不分频）。
+        // 复位态：系统时钟 4 MHz，HCLK = PCLK = 4 MHz。HC32L110/L13x
+        // 为 RCH 4 MHz（各自 RM 3.5.1 SYSCTRL0 复位值 0x0000_0001：
+        // 默认源 RCH、不分频）；HC32F420 为 RCHCLKD 4 MHz（RCH 24 MHz
+        // 本振 6 分频：RCHCR 复位值 0x2、DIV 编码 0010 = /6，RM
+        // 3.1.2/3.5.6，CR0 复位值 0x0000_0000 选 RCHCLKD 且各分频为 1）。
         Self {
             sys: Hertz::mhz(4),
             hclk: Hertz::mhz(4),
@@ -757,14 +787,19 @@ impl Default for Clocks {
     }
 }
 
-static SYS_HZ: AtomicU32 = AtomicU32::new(BACKEND_RCH_HZ);
-static HCLK_HZ: AtomicU32 = AtomicU32::new(BACKEND_RCH_HZ);
-static PCLK_HZ: AtomicU32 = AtomicU32::new(BACKEND_RCH_HZ);
+static SYS_HZ: AtomicU32 = AtomicU32::new(BACKEND_SYS_HZ);
+static HCLK_HZ: AtomicU32 = AtomicU32::new(BACKEND_SYS_HZ);
+static PCLK_HZ: AtomicU32 = AtomicU32::new(BACKEND_SYS_HZ);
+// F420 的第二根 APB 总线时钟（复位默认与 PCLK0 相同；可配置时钟树
+// 接入后由 store 路径更新）。
+#[cfg(sysctrl_ddl_v4)]
+static PCLK1_HZ: AtomicU32 = AtomicU32::new(BACKEND_SYS_HZ);
 
 /// 读取当前时钟频率快照。
 ///
-/// HC32L110 未经 [`init`] 配置、HC32L13x 未经 [`init_default`] 装载时
-/// 返回复位默认值（RCH 4 MHz、不分频）。
+/// HC32L110 未经 [`init`] 配置、HC32L13x/F420 未经 [`init_default`]
+/// 装载时返回复位默认值（4 MHz、不分频）。F420 的 `pclk` 为 PCLK0
+/// （APB0）；PCLK1（APB1）另有 [`pclk1`] 查询。
 pub fn clocks() -> Clocks {
     Clocks {
         sys: Hertz(SYS_HZ.load(Ordering::Relaxed)),
@@ -773,8 +808,15 @@ pub fn clocks() -> Clocks {
     }
 }
 
-// L13x 默认路径不经此更新（快照保持 BACKEND_RCH_HZ 默认值），仅
-// sysctrl_ddl_v2_2 的可配置时钟树调用。
+/// 读取 PCLK1（APB1）频率快照（仅 HC32F420：该布局有两根 APB 总线，
+/// 复位默认 PCLK1 = PCLK0 = HCLK，RM 3.5.2 PCLK1PRS 复位值 0）。
+#[cfg(sysctrl_ddl_v4)]
+pub fn pclk1() -> Hertz {
+    Hertz(PCLK1_HZ.load(Ordering::Relaxed))
+}
+
+// L13x/F420 默认路径不经此更新（快照保持 BACKEND_SYS_HZ 默认值），
+// 仅 sysctrl_ddl_v2_2 的可配置时钟树调用。
 #[cfg(sysctrl_ddl_v2_2)]
 #[allow(dead_code)]
 fn store_clocks(c: Clocks) {
@@ -787,22 +829,25 @@ fn store_clocks(c: Clocks) {
 // 配置与初始化
 // ---------------------------------------------------------------------------
 
-/// HC32L13x 默认时钟初始化（对齐厂商 `SystemInit` 默认路径）。
+/// HC32L13x/HC32F420 默认时钟初始化（对齐厂商 `SystemInit` 默认路径）。
 ///
 /// Rust 启动路径不执行厂商启动代码，本函数补齐其中的默认动作：
 ///
-/// - 装载 RCH 出厂校准 TRIM（flash 0x00100C08，4 MHz 档；RM 3.1.1/
-///   3.5.4）；
-/// - 装载 RCL 出厂校准 TRIM（flash 0x00100C22，32.768 kHz 档，不开源）。
+/// - HC32L13x：装载 RCH 出厂校准 TRIM（flash 0x00100C08，4 MHz 档；
+///   RM 3.1.1/3.5.4）与 RCL 出厂校准 TRIM（flash 0x00100C22，
+///   32.768 kHz 档，不开源）；
+/// - HC32F420：装载 RCL 出厂校准 TRIM（flash 0x0100_11E8，32.768 kHz
+///   档）与 RCH 出厂校准 TRIM（flash 0x0100_11E4，24 MHz 档）。
 ///
-/// 装载后系统时钟为复位默认 RCH 4 MHz，HCLK = PCLK = 4 MHz（SYSCTRL0
-/// 复位值 0x0000_0001，RM 3.5.1），频率快照与 [`clocks`] 默认值一致。
-/// 可配置时钟树（5 源切换、PLL，RM 3.2）未接入，接入后由 `Config`
-/// 形式的 API 取代（AGENTS.md「仅接入默认时钟的型号只开放已实现的
-/// 时钟能力」）。
+/// 装载后系统时钟保持复位默认：L13x 为 RCH 4 MHz（SYSCTRL0 复位值
+/// 0x0000_0001，RM 3.5.1），F420 为 RCHCLKD 4 MHz（RCH 24 MHz 经
+/// RCHCR.DIV = 2 分频，RM 3.1.2/3.5.6），HCLK = PCLK = 4 MHz，频率
+/// 快照与 [`clocks`] 默认值一致。可配置时钟树（多源切换、PLL，各 RM
+/// 3.2）未接入，接入后由 `Config` 形式的 API 取代（AGENTS.md「仅接入
+/// 默认时钟的型号只开放已实现的时钟能力」）。
 ///
 /// [`clock::Config`]: Config
-#[cfg(sysctrl_ddl_v3_1)]
+#[cfg(any(sysctrl_ddl_v3_1, sysctrl_ddl_v4))]
 pub fn init_default() {
     backend::init_default();
 }

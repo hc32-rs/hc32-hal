@@ -291,3 +291,23 @@
 | SDK 依据 | `xh_ddl_sdk/HC32L13x_DDL_Rev2.2.0/mcu/common/system_hc32l13x.c` `SystemInit` 写 TRIM 后不查询 STABLE、不延时，直接进入后续初始化 |
 | HAL 处理 | `hc32-ddl-hal/src/clock/sysctrl_v3_1.rs` `init_default` 与 SDK 一致不等待（RCH 未关停、TRIM 同档替换，4 us 量级稳定远快于任何后续寄存器访问序列）；代码注释标注该取舍 |
 | 验证状态 | 待验证（与上一条同场景板测：装载后立即读时钟相关外设无异常即确认） |
+
+## HC32F420 · SYSCTRL · SystemInit 整字写 RCHTRIM/RCLTRIM 覆盖保留位
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32F420KATB，SYSCTRL `ddl_v4`，默认初始化的 TRIM 装载 |
+| 手册依据 | `RM_HC32F420系列参考手册_Rev1.30` 3.5.10 RCHTRIM：位 8~0 为 TRIM，**位 31~9 为保留位，必须保持复位值**；3.5.11 RCLTRIM：位 9~0 为 TRIM，**位 31~10 为保留位，必须保持复位值**；3.5.10/3.5.11 另载明出厂校准值存于 flash 0x0100_11E4（RCH，24 MHz 档）与 0x0100_11E8（RCL，32.768 kHz 档），以 2 字节地址区间（0x0100_11E4~E5、0x0100_11E8~E9）给出、未使用明确位宽术语 |
+| SDK 依据 | `xh_ddl_sdk/HC32F420_DDL_Rev1.3.1/mcu/common/system_hc32f420.c` `SystemInit`：`HC_SYSCTRL->RCLTRIM = *((uint32_t*)0x010011E8); HC_SYSCTRL->RCHTRIM = *((uint32_t*)0x010011E4);`——按 32 位整字读 flash 并整字覆盖写寄存器，若 flash 相邻内容非零则保留位一并被改写 |
+| HAL 处理 | `hc32-ddl-hal/src/clock/sysctrl_v4.rs` `init_default` 按 16 位读 flash 校准值、经 PAC 字段访问器 `set_trim` 位域写入（RMW 保留位不动），写序沿用 SDK 的先 RCL 后 RCH；反汇编核对为字段宽 10/9 的 `bfi` 写入 |
+| 验证状态 | 待验证（上板后核对装载后 RCHTRIM/RCLTRIM 整字仅 TRIM 位域异于复位值、RCHCLKD 为 4 MHz 档） |
+
+## HC32F420 · GPIO · RM 自身 GPIO_PUPD 复位值两处不一致
+
+| 字段 | 记录内容 |
+| --- | --- |
+| 适用范围 | DDL，HC32F420KATB，GPIO `ddl_v3_1`，复位态上下拉（审阅发现，HAL 不依赖复位值） |
+| 手册依据 | `RM_HC32F420系列参考手册_Rev1.30` 表 6-5（寄存器偏移与复位值）：GPIO_PUPD 复位值 **(PA)0x0000_6000、(PB)0x0800_0000**（PA13/PA14 上拉 PU13/PU14、PB11 下拉 PD11，与 RM 6.3.3 复位态描述自洽）；而 RM 6.4.6 章节头标注复位值 **(PA)0x0400_6000、(PB)0x0000_0000**——两处互相矛盾，6.4.6 头部疑为笔误 |
+| SDK 依据 | SDK 无 PUPD 复位值定义（`mcu/common/hc32f420.h` 头文件不含复位值；复位值信息仅来自 RM）。`driver/src/gpio.c` `GPIO_Init` 按目标态整写 PUPD 字段，不读回复位值 |
+| HAL 处理 | `hc32-ddl-hal/src/gpio/gpio_v3_1.rs` `set_pull` 每次显式单次 RMW 写入目标 PU/PD 位（互斥，另一方向清零），不依赖任何复位值；PC/PD 端口的复位上下拉态以表 6-5 版本为准 |
+| 验证状态 | 已确认（表 6-5 与 6.3.3 逐位互证一致，采信表 6-5；6.4.6 头部数值未采信。上板可用调试器读复位后 PUPD 整字佐证） |

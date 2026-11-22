@@ -22,6 +22,14 @@ pub use peripherals_l13x::Peripherals;
 #[cfg(feature = "hc32l13x")]
 pub use peripherals_l13x::*;
 
+#[cfg(feature = "hc32f420")]
+mod peripherals_f420;
+#[cfg(feature = "hc32f420")]
+pub use peripherals_f420::Peripherals;
+// 引脚单例类型随系列文件一并重导出（后续通信驱动按引脚名引用）。
+#[cfg(feature = "hc32f420")]
+pub use peripherals_f420::*;
+
 use core::sync::atomic::{AtomicBool, Ordering};
 
 /// 全部外设单例的独占占用标志，两系列共用。

@@ -79,7 +79,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | debug_active | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
 | dmac | ⬜ | ⬜ | ⬜ | ⬜ | ➖ | ⬜ | ➖ |
 | flash | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| gpio | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | [🧪](#hc32l110-gpio) |
+| gpio | ⬜ | ⬜ | ⬜ | [🧩](#hc32f420-gpio) | ⬜ | ⬜ | [🧪](#hc32l110-gpio) |
 | gpioaux | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | gtim | ➖ | ➖ | ➖ | ⬜ | ⬜ | ➖ | ➖ |
 | hdiv | ⬜ | ➖ | ➖ | ➖ | ➖ | ⬜ | ➖ |
@@ -98,7 +98,7 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 | reset | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ⬜ |
 | rtc | ➖ | ➖ | ➖ | ➖ | ⬜ | ⬜ | ⬜ |
 | spi | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ |
-| sysctrl | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | [🧪](#hc32l110-sysctrl) |
+| sysctrl | ⬜ | ⬜ | ⬜ | [🧩](#hc32f420-sysctrl) | ⬜ | ⬜ | [🧪](#hc32l110-sysctrl) |
 | tim | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | ➖ |
 | trng | ⬜ | ⬜ | ⬜ | ➖ | ⬜ | ⬜ | ➖ |
 | uart | ⬜ | ⬜ | ⬜ | ➖ | ➖ | ⬜ | [🧪](#hc32l110-uart) |
@@ -470,3 +470,11 @@ HC32F175 已由数据工具暂停支持，未纳入 LL 表。
 ### HC32L13x sysctrl
 
 🧩 已编写缺例程。`hc32-ddl-hal` 实现了 SYSCTRL `ddl_v3_1` 默认初始化（`clock/sysctrl_v3_1.rs`）：`init(Config::default())` 对齐厂商 `SystemInit` 的默认时钟路径——装载 RCH 出厂校准 TRIM（flash 0x00100C08，4 MHz 档，RM 3.1.1/3.5.4）与 RCL 出厂校准 TRIM（flash 0x00100C22，32.768 kHz 档，RM 3.5.6，不开源）；Rust 启动路径不执行厂商启动代码，这两步是复位态之上唯一需要的软件动作。装载后系统时钟保持复位默认：RCH 4 MHz，HCLK = PCLK = 4 MHz（SYSCTRL0 复位值 0x0000_0001，RM 3.5.1），与 `clocks()` 快照一致。可配置时钟树（RM 3.2 的 5 源切换含 PLL、门控 API）未接入，型号只开放已实现能力；L110 的可配置时钟行为不受影响。HC32L136 STK 板级例程（`examples/ddl/hc32l136-stk/`）经 `init` 走此默认路径，`blinky` 另以 `debug_assert_eq!` 核对 `clock::clocks().hclk` 为 4 MHz（release 下不生效）。待时钟 API 扩展与板测后升级 ✅。
+
+### HC32F420 gpio
+
+🧩 已编写缺例程。`hc32-ddl-hal`（feature `hc32f420katb`）在默认时钟（复位 RCH 24 MHz 本振 6 分频——RCHCR 复位值 0x2、DIV 编码 0010 = /6——得 RCHCLKD 4 MHz）下实现数字 GPIO 的 `gpio/ddl_v3_1` 布局（RM Rev1.30 第 6 章，对照 SDK `driver/src/gpio.c`）：这是首个「一个 IP 对应多个独立端口实例」的接入——GPIOA~GPIOD 各为独立外设实例（0x4002_4000 起步进 0x400），寄存器后端 `gpio/gpio_v3_1.rs` 一份实现按 `PinId.port` 分发到对应 PAC 实例，各自走 SYSCTRL_AHB1EN 位 0~3 门控（`clock/sysctrl_v4.rs` 的 `enable_gpio(port)`），构建期由 build.rs 的 GPIO 实例表整体核对四实例的 `registers.kind/version` 及 SYSCTRL 依赖后统一发放 `gpio_ddl_v3_1`。极性与位操作逐项核对 RM 6.4：DIR 1=输入、ADS 1=模拟、AFRL/H 4 位 AFSEL（0=数字 GPIO，复用编号待后续驱动接入）、PUPD 单寄存器低 16 位 PU/高 16 位 PD（一次 RMW 同时写上下拉，互斥置位遵守「PU&PD 同 1 为上拉」注）、DRIVER 1=低驱动、OUT 锁存 1=高。`set_high`/`set_low` 使用 BSRR/BRR 专用写通道（W1 位，整字只写目标位掩码），输入从 IN 采样读，StatefulOutputPin 从 OUT 锁存读回；输出构造先写初值锁存再切 DIR。PD 端口仅实现位 0~3（RM 表 6-5 PD 寄存器复位值 0x0000_000F）。公共 API（`Flex`/`Input`/`Output`/`OutputOpenDrain` + embedded-hal 1.0 数字 trait、Drop/persist）与 L110/L13x 共享入口，`set_pin_af` 亦按端口门控后经 AFRL/H 写入。LQFP64（KATB）52 个 IO 全部引出（DS Rev1.20 表 4-1），引脚单例按表建立并在编译期与期望位掩码 [0xFFFF, 0xFFFF, 0xFFFF, 0x000F] 比对；专用脚不发或附条件说明：NRESET 不作为 GPIO 发放，PA13/PA14 复位默认 SWD 调试口（改 GPIO 需 CR1.SWDIO，开关待时钟模块接入后开放），PB11=BOOT0 按引脚表发放，PD00/PD01=XTH 晶振脚（接晶振须配模拟）。普通数字 GPIO 不依赖 GPIOAUX（该实例只承载 MCO/PCLK 分频输出与定时器 ETR/CAP 路由，RM 3.6），未接入。证据：编译 = `cargo check -p hc32-ddl-hal --target thumbv7em-none-eabi --features hc32f420katb` 通过（`__FPU_PRESENT=0` 软浮点目标），既有 13 个 L110/L13x 料号回归通过、零料号/双料号诊断不变；链接 = 临时 no_std 程序（cortex-m-rt `#[entry]` + `memory-x` + 标准 `link.x`）完成 `init(Config::default())` 后跨端口构造 PB10 上拉输入（GPIOB，AHB1EN 位 1）与 PA04 初值高输出（GPIOA，AHB1EN 位 0），覆盖输入采样、指定初值输出、置位/清零与锁存读回（含 embedded-hal trait 泛型调用），armv7e-m ELF（向量表 @0x0、.text 688 B、无 FPU 指令）且反汇编核对各寄存器地址与位掩码：RCHTRIM/RCLTRIM @0x4000_B824/B828 为字段宽 9/10 的 `bfi` 写入，AHB1EN @0x4000_B83C 按引脚端口置位 1/0，PB10 走 GPIOB 的 AFRL→AFRH(0x4002_4434)/ADS/PUPD(PU10 置 PD10 清)/DIR=1/IN 读，PA04 走 GPIOA 的 BSRR(0x4002_4028) 先写初值再 PUPD/OPENDRAIN/DRIVER、最后 DIR=0，循环内 OUT(0x4002_4020) 锁存读回 + BSRR/BRR 条件写。板测状态：未板测（无板），实测后升级 ✅。
+
+### HC32F420 sysctrl
+
+🧩 已编写缺例程。`hc32-ddl-hal` 实现 SYSCTRL `ddl_v4` 默认初始化（`clock/sysctrl_v4.rs`）：`init(Config::default())` 对齐厂商 `SystemInit`（SDK `mcu/common/system_hc32f420.c`）的默认时钟路径——先领取外设单例，再装载 RCL 出厂校准 TRIM（flash 0x0100_11E8，32.768 kHz 档，RM 3.5.11）与 RCH 出厂校准 TRIM（flash 0x0100_11E4，24 MHz 档，RM 3.5.10），字段宽 10/9 位、整字 RMW 保留位不动（SDK 为整字覆盖含保留位，已登记差异台账；TRIM 值复位时由硬件装载，软件重写属对齐厂商路径的冗余但无害动作）。装载后系统时钟保持复位默认：RCH 24 MHz 经 RCHCR.DIV 复位值 2（6 分频）得 RCHCLKD 4 MHz，CR0 复位值 0 使 HCLK = PCLK0 = PCLK1 = 4 MHz（RM 3.1.2/3.5.1）——注意区分 24 MHz 的 RCH 振荡器频率与 4 MHz 的系统时钟，`clocks()` 快照的 sys/hclk/pclk（=PCLK0）与 v4 专属 `clock::pclk1()` 均按 4 MHz 表达。CR3 的 0x5A5A/0xA5A5 序列保护只覆盖 CR0~CR2（RCHCR 分频在其中），默认路径不改写这些寄存器故不触碰解锁序列；TRIM 与 AHB1EN 不受保护（RM 3.5.9）。可配置时钟树（多源切换、PLL、分频、门控 API、SWD 复用开关）未接入，首版范围限定默认时钟与 GPIO 所需的逐端口 AHB1 门控。证据：编译同 gpio 条目（thumbv7em-none-eabi 单料号 check 通过）；链接由 gpio 条目的临时程序佐证（init 后 `clocks().hclk/pclk` 与 `pclk1()` 断言均为 4 MHz，反汇编确认 TRIM 双写先于任何 GPIO 门控）。板测状态：未板测（无板），实测后升级 ✅。

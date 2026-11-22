@@ -41,6 +41,9 @@ use hc32_metapac::metadata::METADATA;
 /// 组合依赖（SYSCTRL 门控）按实际使用核对：
 /// - ddl_v2（L110）：GPIO 门控位 PERI_CLKEN.GPIO（RM 3.5.8）；
 /// - ddl_v3_3（L13x）：PERI_CLKEN.GPIO（RM 3.5.9）；
+/// - ddl_v3_1（F420）：GPIOA~GPIOD 各占 SYSCTRL_AHBEN1 位 0~3
+///   （RM 3.5.16）；GPIOAUX（MCO/PCLK 输出与定时器 ETR/CAP 复用选择）
+///   不被普通数字 GPIO 依赖，不入表。
 /// 后续接入的门控位于其他寄存器或需额外实例时在此补充。
 const GPIO_DRIVER_BACKENDS: &[(&[&str], (&str, &str), &[(&str, &str)])] = &[
     (
@@ -53,6 +56,11 @@ const GPIO_DRIVER_BACKENDS: &[(&[&str], (&str, &str), &[(&str, &str)])] = &[
         ("gpio", "ddl_v3_3"),
         &[("SYSCTRL", "sysctrl_ddl_v3_1")],
     ),
+    (
+        &["GPIOA", "GPIOB", "GPIOC", "GPIOD"],
+        ("gpio", "ddl_v3_1"),
+        &[("SYSCTRL", "sysctrl_ddl_v4")],
+    ),
 ];
 
 /// HAL 已适配的驱动后端：`((kind, version), 组合依赖)`。
@@ -63,6 +71,10 @@ const GPIO_DRIVER_BACKENDS: &[(&[&str], (&str, &str), &[(&str, &str)])] = &[
 /// - SYSCTRL ddl_v3_1（HC32L13x）：当前只实现默认初始化（装载出厂
 ///   TRIM）与 GPIO 门控，不触碰晶振引脚与 FLASH 寄存器，仅依赖 GPIO
 ///   （未引出脚上拉）；可配置时钟树接入后再按 L13x RM 3.2 补依赖；
+/// - SYSCTRL ddl_v4（HC32F420）：默认路径只装载 RCH/RCL 出厂 TRIM、
+///   按端口开关 GPIO 的 AHB1 门控（复位默认 RCHCLKD 4 MHz ≤ 24 MHz，
+///   不触碰 FLASH_WAIT 与晶振引脚），无组合依赖；可配置时钟树接入后
+///   再按 F420 RM 3.2 补依赖；
 /// - BT/ADT/LPTIM/PCA：输出门控选择直接写 GPIO CTRLx（RM 9/11/12/13），
 ///   时钟门控与频率经 SYSCTRL；
 /// - UART/LPUART：波特率定时器占用 BT（RM 15.1/16.1）、引脚复用经
@@ -74,6 +86,7 @@ const GPIO_DRIVER_BACKENDS: &[(&[&str], (&str, &str), &[(&str, &str)])] = &[
 const DRIVER_BACKENDS: &[((&str, &str), &[&str])] = &[
     (("sysctrl", "ddl_v2_2"), &["gpio_ddl_v2", "flash_ddl_v3"]),
     (("sysctrl", "ddl_v3_1"), &["gpio_ddl_v3_3"]),
+    (("sysctrl", "ddl_v4"), &[]),
     (("bt", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
     (("adt", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
     (("lptim", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
@@ -150,6 +163,7 @@ fn main() {
         "CARGO_FEATURE_HC32L13X_32PIN",
         "CARGO_FEATURE_HC32L13X_48PIN",
         "CARGO_FEATURE_HC32L13X_64PIN",
+        "CARGO_FEATURE_HC32F420",
     ];
     let mut chip_features = env::vars().map(|(name, _)| name).filter(|name| {
         name.starts_with("CARGO_FEATURE_HC32") && !INTERNAL_FEATURES.contains(&name.as_str())
