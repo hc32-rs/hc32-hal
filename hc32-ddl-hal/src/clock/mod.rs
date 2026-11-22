@@ -534,7 +534,7 @@ impl XtlConfig {
     ///
     /// DRIVER 编码取 DS 7.3.7 推荐值 0b1010（amp=10、driver=10）。RM
     /// 3.5.7 字段级推荐为 amp=10、driver=01，与 DS 整体推荐不一致，差异
-    /// 见 `docs/sdk-doc-discrepancies.md`，默认取 DS 电气特性表推荐值。
+    /// 见 `docs/sdk-doc-discrepancies/hc32l110.md`，默认取 DS 电气特性表推荐值。
     pub fn crystal() -> Self {
         Self {
             amplitude: XtlAmplitude::Large,

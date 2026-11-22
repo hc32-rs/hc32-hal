@@ -1,6 +1,6 @@
 //! CRC 自检：按 RM 与定稿驱动验证 CRC 编码/校验模式、写入位宽与 FLAG
-//! 行为（板测矩阵 T1~T4，见 hc32-hal/docs/sdk-doc-discrepancies.md 的
-//! HC32L110 CRC 条目）。
+//! 行为（板测矩阵 T1~T4，见 hc32-hal/docs/sdk-doc-discrepancies/hc32l110.md
+//! 的 CRC 条目）。
 //!
 //! 例程所需接线（HC32L110C6PA）：LED 接 P23，低电平点亮（输出 0 亮、
 //! 输出 1 灭）。无需其他接线。

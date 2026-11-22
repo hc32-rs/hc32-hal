@@ -33,7 +33,7 @@ use crate::pac;
 /// SDK SystemInit 按 `*((uint32_t*)地址)` 整字读出并整字写入校准寄存器，
 /// 会连同 b31~b9（RCHTRIM）/b31~b10（RCLTRIM）的保留位一起写；RM 要求
 /// 保留位保持复位值，本驱动按 RM 文档的 2 字节校准值读取并只写 TRIM
-/// 字段（差异见 docs/sdk-doc-discrepancies.md）。
+/// 字段（差异见 docs/sdk-doc-discrepancies/hc32f420.md）。
 ///
 /// `SystemCoreClockUpdate` 配置 SysTick 属于 CMSIS 运行时，不搬运。
 /// 系统时钟保持复位默认：RCH 24 MHz 经 RCHCR.DIV = 2 分频为 RCHCLKD

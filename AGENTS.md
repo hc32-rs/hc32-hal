@@ -66,7 +66,7 @@ DS 和 UM/RM 平时阅读优先使用同名 `.md`（MinerU 转换产物，与 PD
 
 ## 手册与 SDK 差异
 
-实现 agent 发现 DS 或 UM/RM 与 SDK 的定义或操作顺序不符时，应在同一变更中更新 [手册与 SDK 差异记录](docs/sdk-doc-discrepancies.md)。逐项列出双方证据、驱动采用的行为和验证状态。缺少定论时标记“待验证”，后续获得勘误或实测结果时更新原条目。
+实现 agent 发现 DS 或 UM/RM 与 SDK 的定义或操作顺序不符时，应在同一变更中更新[手册与 SDK 差异记录](docs/sdk-doc-discrepancies.md)：条目写入对应系列文件 `docs/sdk-doc-discrepancies/<系列>.md`（如 `hc32l110.md`），并同步索引的条目数和条目清单。逐项列出双方证据、驱动采用的行为和验证状态。缺少定论时标记“待验证”，后续获得勘误或实测结果时更新原条目。
 
 发现上游数据问题时，在对应数据仓库按外层工作区 AGENTS.md 的流程修正并重新生成。HC32F175 的支持状态以 hc32-data-tools 的 support_scope.py 为准。
 
