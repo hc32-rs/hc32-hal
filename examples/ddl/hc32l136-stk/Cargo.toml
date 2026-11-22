@@ -1,0 +1,22 @@
+[workspace]
+
+[package]
+name = "hc32l136-stk"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+cortex-m = "0.7"
+cortex-m-rt = { version = "0.7", features = ["device"] }
+hc32-ddl-hal = { path = "../../../hc32-ddl-hal", features = ["hc32l136k8ta", "rt", "memory-x"] }
+panic-halt = "1"
+
+# 板上 Flash 为 64 KiB，调试构建也按大小优化。
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+opt-level = "s"
+lto = true
