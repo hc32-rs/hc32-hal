@@ -28,6 +28,18 @@ pub(crate) fn enable() {
     crate::clock::enable_gpio();
 }
 
+/// 打开 `port` 端口寄存器的时钟门控，幂等。
+///
+/// v3_3 布局的全部端口（PA–PD）汇集在单一 GPIO 外设内，共用一个门控位；
+/// 按端口入口是为多端口实例的布局（gpio_ddl_v3_1）保持同一调用形式。
+#[allow(dead_code)]
+pub(crate) fn enable_port(port: u8) {
+    match port {
+        0..=3 => enable(),
+        _ => unreachable!("GPIO v3_3 后端无此端口"),
+    }
+}
+
 /// 方向位（PxDIR）：`true` = 输入，`false` = 输出（RM 6.5.1.17）。
 ///
 /// 复位值 0xFFFF：全部输入（与 RM 6.3"芯片复位后端口为高阻输入"一致）。
@@ -428,6 +440,16 @@ pub(crate) fn set_pu(n: PinId, enable: bool) {
         (3, 7) => pac::GPIO.pdpu().modify(|w| w.set_pd07(enable)),
         _ => unreachable!("GPIO v3_3 后端无此引脚"),
     }
+}
+
+/// 上/下拉配置（PxPU/PxPD），一次写入目标态。
+///
+/// `Pull::None` 时两位均清零；`Pull::Up`/`Pull::Down` 只置对应位并
+/// 清另一位（L13x RM 6.5.1.x 上/下拉互斥配置，SDK `Gpio_Init` 同做法）。
+#[inline(always)]
+pub(crate) fn set_pull(n: PinId, pull: super::Pull) {
+    set_pu(n, matches!(pull, super::Pull::Up));
+    set_pd(n, matches!(pull, super::Pull::Down));
 }
 
 /// 下拉使能位（PxPD）。

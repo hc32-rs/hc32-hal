@@ -13,6 +13,11 @@
 //!   选择 IP 后端（AGENTS.md「从具体型号选择驱动」）。
 //! - 实例 cfg `peri_<小写实例名>`：芯片拥有该外设实例。
 //!
+//! GPIO 是多端口 IP，选择按实例核对（`GPIO_DRIVER_BACKENDS`）：所列
+//! 端口实例须全部存在且 `registers` 为该 (kind, version)，门控依赖精确
+//! 到 (实例名, 后端)，不把实例 A 的存在与实例 B 的版本拼成可用驱动。
+//! 驱动模块与引脚单例引用同一批 cfg，使用一致的选择结果。
+//!
 //! 已出现在 PAC 中但尚未适配的 IP 不发后端 cfg，保持私有。零料号时
 //! 构建依赖不激活，本脚本不引用元数据，lib.rs 的 `compile_error!`
 //! 负责诊断；两个料号时在读取元数据前拦下，给出 HAL 自己的中文提示。
@@ -23,6 +28,32 @@ use std::env;
 // 零料号时两侧都不存在，元数据读取整体 cfg 掉。
 #[cfg(feature = "_chip-selected")]
 use hc32_metapac::metadata::METADATA;
+
+/// GPIO 驱动的实例级后端：`(端口实例集合, (kind, version), 组合依赖)`。
+///
+/// GPIO 是一个 IP 对应多个独立端口实例的外设（L110/L13x 的 `GPIO`
+/// 汇集全部端口；HC32F420 起每个端口是独立实例 GPIOA…GPIOD）。选择
+/// 按实例核对：所列端口实例须全部存在且 `registers` 均为该
+/// (kind, version)，门控依赖精确到 (实例名, 后端 cfg)，避免把实例 A
+/// 的存在与实例 B 的版本拼成可用驱动。驱动模块与 `Peripherals` 引脚
+/// 字段引用同一批 `peri_gpio*` cfg，使用一致的选择结果。
+///
+/// 组合依赖（SYSCTRL 门控）按实际使用核对：
+/// - ddl_v2（L110）：GPIO 门控位 PERI_CLKEN.GPIO（RM 3.5.8）；
+/// - ddl_v3_3（L13x）：PERI_CLKEN.GPIO（RM 3.5.9）；
+/// 后续接入的门控位于其他寄存器或需额外实例时在此补充。
+const GPIO_DRIVER_BACKENDS: &[(&[&str], (&str, &str), &[(&str, &str)])] = &[
+    (
+        &["GPIO"],
+        ("gpio", "ddl_v2"),
+        &[("CLOCK", "sysctrl_ddl_v2_2")],
+    ),
+    (
+        &["GPIO"],
+        ("gpio", "ddl_v3_3"),
+        &[("SYSCTRL", "sysctrl_ddl_v3_1")],
+    ),
+];
 
 /// HAL 已适配的驱动后端：`((kind, version), 组合依赖)`。
 ///
@@ -39,10 +70,9 @@ use hc32_metapac::metadata::METADATA;
 /// - CRC/WDT/CLK_TRIM：仅 SYSCTRL 门控。
 ///
 /// 芯片拥有 IP 只说明寄存器布局，缺任一依赖的型号不开放该驱动。
+/// GPIO 不在本表：按实例核对（[`GPIO_DRIVER_BACKENDS`]）。
 const DRIVER_BACKENDS: &[((&str, &str), &[&str])] = &[
-    (("gpio", "ddl_v2"), &["sysctrl_ddl_v2_2"]),
     (("sysctrl", "ddl_v2_2"), &["gpio_ddl_v2", "flash_ddl_v3"]),
-    (("gpio", "ddl_v3_3"), &["sysctrl_ddl_v3_1"]),
     (("sysctrl", "ddl_v3_1"), &["gpio_ddl_v3_3"]),
     (("bt", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
     (("adt", "ddl_v1"), &["gpio_ddl_v2", "sysctrl_ddl_v2_2"]),
@@ -70,10 +100,21 @@ fn main() {
         let cfg = format!("{kind}_{version}");
         println!("cargo:rustc-check-cfg=cfg({cfg})");
     }
-    // 驱动源码引用的实例 cfg 固定为 L110 的实例名；L13x 的 SYSCTRL
-    // 实例名一并列出（select_drivers 覆盖元数据中的全部实例）。
+    for (_, (kind, version), _) in GPIO_DRIVER_BACKENDS {
+        let cfg = format!("{kind}_{version}");
+        println!("cargo:rustc-check-cfg=cfg({cfg})");
+    }
+    // 驱动源码引用的实例 cfg 固定为 L110/L13x 的实例名；多端口 IP 的
+    // 端口实例名（F420 的 GPIOA…GPIOD）一并列出（select_drivers 覆盖
+    // 元数据中的全部实例）。
     for instance in [
         "peri_gpio",
+        "peri_gpioa",
+        "peri_gpiob",
+        "peri_gpioc",
+        "peri_gpiod",
+        "peri_gpioaux",
+        "peri_clock",
         "peri_clock",
         "peri_flash",
         "peri_sysctrl",
@@ -211,6 +252,74 @@ fn select_drivers(feature_name: String, metadata: &hc32_metapac::metadata::Metad
         } else {
             println!(
                 "cargo:warning=hc32-ddl-hal: {} 的驱动 {} 需要的后端 {} 缺失，\
+                 该驱动在本型号上不开放",
+                metadata.name,
+                backend_cfg,
+                missing.join(", ")
+            );
+        }
+    }
+
+    // GPIO 后端：按实例核对。端口实例集合全部存在且均为已适配的
+    // (kind, version) 时发放对应后端 cfg；门控依赖（SYSCTRL 系统控制
+    // 器）精确匹配 (实例名, 后端 cfg)。芯片同时拥有多种已适配布局时
+    // 按集合分别发放（同一颗芯片也可能有多种布局）。
+    for (port_instances, (kind, version), deps) in GPIO_DRIVER_BACKENDS {
+        let backend_cfg = format!("{kind}_{version}");
+        // 集合内实例逐个核对 (实例名, kind, version)。全不命中是其他
+        // 家族布局的正常情况，静默跳过；部分命中说明本型号拥有该布局
+        // 的部分端口但集合不全（或版本混杂），告警且不发放，避免把
+        // 实例 A 的存在与实例 B 的版本拼成可用驱动。
+        let matched: Vec<&str> = port_instances
+            .iter()
+            .copied()
+            .filter(|name| {
+                metadata.peripherals.iter().any(|p| {
+                    p.name == *name
+                        && p.registers
+                            .as_ref()
+                            .is_some_and(|r| r.kind == *kind && r.version == *version)
+                })
+            })
+            .collect();
+        if matched.is_empty() {
+            continue;
+        }
+        if matched.len() != port_instances.len() {
+            let unmatched: Vec<&str> = port_instances
+                .iter()
+                .copied()
+                .filter(|name| !matched.contains(name))
+                .collect();
+            println!(
+                "cargo:warning=hc32-ddl-hal: {} 的端口实例 {} 缺失或不为 {} 布局，\
+                 GPIO 驱动 {} 在本型号上不开放",
+                metadata.name,
+                unmatched.join("/"),
+                backend_cfg,
+                backend_cfg
+            );
+            continue;
+        }
+        let missing: Vec<String> = deps
+            .iter()
+            .filter(|(dep_name, dep_cfg)| {
+                !metadata.peripherals.iter().any(|p| {
+                    p.name == *dep_name
+                        && p.registers
+                            .as_ref()
+                            .is_some_and(|r| format!("{}_{}", r.kind, r.version) == *dep_cfg)
+                })
+            })
+            .map(|(dep_name, dep_cfg)| format!("{dep_name}({dep_cfg})"))
+            .collect();
+        if missing.is_empty() {
+            // 实例 cfg 已在上方按“芯片拥有该实例”发放，这里补充后端 cfg。
+            println!("cargo:rustc-check-cfg=cfg({backend_cfg})");
+            println!("cargo:rustc-cfg={backend_cfg}");
+        } else {
+            println!(
+                "cargo:warning=hc32-ddl-hal: {} 的 GPIO 驱动 {} 需要的门控实例 {} 缺失，\
                  该驱动在本型号上不开放",
                 metadata.name,
                 backend_cfg,

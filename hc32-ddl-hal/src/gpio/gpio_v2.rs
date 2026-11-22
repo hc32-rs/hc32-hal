@@ -21,6 +21,17 @@ pub(crate) fn enable() {
     crate::clock::enable_gpio();
 }
 
+/// 打开 `port` 端口寄存器的时钟门控，幂等。
+///
+/// v2 布局的全部端口（P0–P3）汇集在单一 GPIO 外设内，共用一个门控位；
+/// 按端口入口是为多端口实例的布局（gpio_ddl_v3_1）保持同一调用形式。
+pub(crate) fn enable_port(port: u8) {
+    match port {
+        0..=3 => enable(),
+        _ => unreachable!("GPIO v2 后端无此端口"),
+    }
+}
+
 /// 方向位（PxDIR）：`true` = 输入，`false` = 输出。
 #[inline(always)]
 pub(crate) fn set_dir(n: PinId, input: bool) {
@@ -139,6 +150,16 @@ pub(crate) fn set_pu(n: PinId, enable: bool) {
         (3, 6) => pac::GPIO.p3pu().modify(|w| w.set_p36(enable)),
         _ => unreachable!("GPIO v2 后端无此引脚"),
     }
+}
+
+/// 上/下拉配置（PxPU/PxPD），一次写入目标态。
+///
+/// `Pull::None` 时两位均清零；`Pull::Up`/`Pull::Down` 只置对应位并
+/// 清另一位（L110 RM 6.3 上/下拉可同时使能但无意义，驱动按互斥配置）。
+#[inline(always)]
+pub(crate) fn set_pull(n: PinId, pull: super::Pull) {
+    set_pu(n, matches!(pull, super::Pull::Up));
+    set_pd(n, matches!(pull, super::Pull::Down));
 }
 
 /// 下拉使能位（PxPD）。

@@ -18,6 +18,13 @@
 //! 输入电平一律从 PxIN 采样寄存器读，输出锁存（StatefulOutputPin 的
 //! `is_set_high` 等）一律从 PxOUT 读回，两种布局一致。
 //!
+//! 门控差异：v2/v3_3 的全部端口汇集在单一 GPIO 外设内共用一个门控位；
+//! 多端口实例布局（F420 的 gpio_ddl_v3_1）每个端口是独立实例、独立
+//! 门控。公共 API 经后端的 `enable_port` 打开引脚所在端口的门控，
+//! 单外设布局退化为统一门控，行为不变。上/下拉（[`Pull`]）也交由
+//! 后端一次写入：v2/v3_3 是独立的 PxPU/PxPD 位对，F420 的 v3_1 合并
+//! 在 PUPD 一个寄存器内。
+//!
 //! [`gpio_v2`]: self::gpio_v2
 //! [`gpio_v3_3`]: self::gpio_v3_3
 
@@ -149,20 +156,20 @@ pub trait Pin: crate::peripheral::PeripheralType + SealedPin + Sized + 'static {
 /// 通信外设驱动按其引脚 trait 提供的复用编号调用；GPIO 驱动本身只用
 /// `af = 0` 回到 GPIO 功能。
 ///
-/// 先打开 GPIO 门控（L110 RM 3.5.8 / L13x RM 3.5.9 的 PERI_CLKEN 位 28
-/// 复位为 0，门控关闭时对 GPIO 寄存器的写入不生效），幂等。
+/// 先打开引脚所在端口的 GPIO 门控（L110 RM 3.5.8 / L13x RM 3.5.9 的
+/// PERI_CLKEN 位 28 复位为 0，门控关闭时对 GPIO 寄存器的写入不生效），
+/// 幂等。
 ///
 /// SDK 复用宏的固定动作序列：ADS 清零 → SEL 写功能号 → DIR 按信号方向
 /// （L110 driver/inc/gpio.h 的 `Gpio_SetFunc_*` 系列；L13x 对应
-/// `Gpio_SetAfMode` 直写 Pxy_SEL）。上/下拉由驱动按需配置。
+/// `Gpio_SetAfMode` 直写 Pxy_SEL）。上/下拉经后端一次写入目标态。
 #[allow(dead_code)] // L13x 侧由后续接入的通信驱动（UART 等）调用
 pub(crate) fn set_pin_af(n: PinId, af: u8, input: bool, pull: Pull) {
-    crate::clock::enable_gpio();
+    backend::enable_port(n.port);
     backend::set_ads(n, false);
     backend::set_dr(n, false);
     backend::set_od(n, false);
-    backend::set_pd(n, matches!(pull, Pull::Down));
-    backend::set_pu(n, matches!(pull, Pull::Up));
+    backend::set_pull(n, pull);
     backend::set_dir(n, input);
     backend::set_sel(n, af);
 }
@@ -184,9 +191,10 @@ pub struct Flex<'d> {
 impl<'d> Flex<'d> {
     /// 接管一个引脚单例，不改变其当前配置。
     pub fn new(pin: Peri<'d, impl Pin>) -> Self {
-        // GPIO 门控复位后为关（L110 RM 3.5.8 位 28 / L13x RM 3.5.9 位 28），
-        // 先打开。
-        crate::clock::enable_gpio();
+        // 引脚所在端口的 GPIO 门控复位后为关（L110 RM 3.5.8 位 28 /
+        // L13x RM 3.5.9 位 28），先打开；多端口实例布局按端口门控
+        // （后端 enable_port）。
+        backend::enable_port(pin.pin_id().port);
         Self {
             pin: pin.pin_id(),
             _phantom: PhantomData,
@@ -196,15 +204,14 @@ impl<'d> Flex<'d> {
     /// 配置为数字输入。
     ///
     /// SEL 置 0（GPIO 功能）、ADS 置 0（数字）、DR/OD 复位，方向置输入，
-    /// 再按 `pull` 配置上/下拉。
+    /// 再按 `pull` 经后端一次配置上/下拉。
     pub fn set_as_input(&mut self, pull: Pull) {
         let n = self.pin;
         backend::set_sel(n, 0);
         backend::set_ads(n, false);
         backend::set_dr(n, false);
         backend::set_od(n, false);
-        backend::set_pd(n, matches!(pull, Pull::Down));
-        backend::set_pu(n, matches!(pull, Pull::Up));
+        backend::set_pull(n, pull);
         backend::set_dir(n, true);
     }
 
@@ -213,8 +220,7 @@ impl<'d> Flex<'d> {
         let n = self.pin;
         backend::set_sel(n, 0);
         backend::set_ads(n, false);
-        backend::set_pd(n, false);
-        backend::set_pu(n, false);
+        backend::set_pull(n, Pull::None);
         backend::set_od(n, false);
         backend::set_dr(n, matches!(drive, Drive::Low));
         backend::set_dir(n, false);
@@ -234,8 +240,7 @@ impl<'d> Flex<'d> {
         backend::set_sel(n, 0);
         backend::set_ads(n, false);
         backend::set_dr(n, matches!(drive, Drive::Low));
-        backend::set_pd(n, matches!(pull, Pull::Down));
-        backend::set_pu(n, matches!(pull, Pull::Up));
+        backend::set_pull(n, pull);
         backend::set_od(n, true);
         backend::set_dir(n, false);
     }
@@ -252,8 +257,7 @@ impl<'d> Flex<'d> {
         let n = self.pin;
         backend::set_sel(n, 0);
         backend::set_dir(n, true);
-        backend::set_pu(n, false);
-        backend::set_pd(n, false);
+        backend::set_pull(n, Pull::None);
         backend::set_od(n, false);
         backend::set_dr(n, false);
         backend::set_ads(n, true);
